@@ -10,7 +10,8 @@ import {
   CheckCircle, 
   AlertCircle,
   FileCode,
-  Archive
+  Archive,
+  Loader2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, UploadedFile } from '@/lib/api';
@@ -31,6 +32,7 @@ export const FileUpload: React.FC = () => {
   const [files, setFiles] = useState<UploadedFileUI[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadDir, setUploadDir] = useState<string>('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -61,6 +63,8 @@ export const FileUpload: React.FC = () => {
 
   const processFiles = async (fileList: File[]) => {
     try {
+      console.log('[FileUpload] Starting file upload process...');
+      
       const newFiles: UploadedFileUI[] = fileList.map(file => ({
         id: Math.random().toString(36).substr(2, 9),
         name: file.name,
@@ -73,8 +77,32 @@ export const FileUpload: React.FC = () => {
       setFiles(prev => [...prev, ...newFiles]);
       setIsUploading(true);
 
+      // Simulate upload progress
+      newFiles.forEach(file => {
+        const fileIndex = files.length;
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+          progress += Math.random() * 30;
+          if (progress >= 100) {
+            progress = 100;
+            clearInterval(progressInterval);
+          }
+          
+          setFiles(prev => {
+            const updated = [...prev];
+            const targetFile = updated.find(f => f.id === file.id);
+            if (targetFile && progress < 100) {
+              targetFile.progress = progress;
+            }
+            return updated;
+          });
+        }, 200);
+      });
+
       // Upload files to backend
+      console.log('[FileUpload] Calling API uploadFiles...');
       const result = await apiClient.uploadFiles(fileList);
+      console.log('[FileUpload] Upload response:', result);
       
       // Update files with backend response
       const completedFiles: UploadedFileUI[] = result.files.map((backendFile, index) => ({
@@ -125,6 +153,8 @@ export const FileUpload: React.FC = () => {
 
   const handleAnalyze = async () => {
     try {
+      console.log('[FileUpload] Starting analysis...');
+      
       const filePaths = files
         .filter(file => file.status === 'completed' && file.path)
         .map(file => file.path!);
@@ -137,20 +167,35 @@ export const FileUpload: React.FC = () => {
         });
         return;
       }
+
+      setIsAnalyzing(true);
+      
+      // Generate job ID
       const jobId = crypto.randomUUID();
-      // Start analysis and navigate to dashboard with job ID
-      const result = await apiClient.startAnalysis(filePaths,jobId);
+      console.log('[FileUpload] Generated job ID:', jobId);
+      console.log('[FileUpload] File paths for analysis:', filePaths);
+      
+      // Start analysis
+      const result = await apiClient.startAnalysis(filePaths, jobId);
+      console.log('[FileUpload] Analysis started:', result);
       
       toast({
         title: "Analysis Started!",
         description: "Redirecting to dashboard to monitor progress...",
       });
 
-      // Navigate to dashboard with job ID
-      navigate(`/dashboard?job_id=${result.job_id}&upload_dir=${encodeURIComponent(uploadDir)}`);
+      // Navigate to dashboard with job ID and upload directory
+      const params = new URLSearchParams({
+        job_id: jobId,
+        upload_dir: uploadDir
+      });
+      
+      navigate(`/dashboard?${params.toString()}`);
       
     } catch (error) {
       console.error('Analysis failed to start:', error);
+      setIsAnalyzing(false);
+      
       toast({
         title: "Analysis Failed",
         description: error instanceof Error ? error.message : "Failed to start analysis",
@@ -184,6 +229,7 @@ export const FileUpload: React.FC = () => {
   };
 
   const hasCompletedFiles = files.some(file => file.status === 'completed');
+  const allFilesCompleted = files.length > 0 && files.every(file => file.status === 'completed');
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
@@ -224,11 +270,11 @@ export const FileUpload: React.FC = () => {
           </div>
           
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button variant="hero" size="lg" className="group-hover:animate-glow">
+            <Button variant="hero" size="lg" className="group-hover:animate-glow" disabled={isUploading}>
               <Folder className="w-5 h-5 mr-2" />
               Choose Files
             </Button>
-            <Button variant="outline" size="lg">
+            <Button variant="outline" size="lg" disabled={isUploading}>
               <Archive className="w-5 h-5 mr-2" />
               Upload ZIP
             </Button>
@@ -241,6 +287,7 @@ export const FileUpload: React.FC = () => {
             className="hidden"
             onChange={handleFileInput}
             accept=".js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.cs,.php,.rb,.go,.zip,.rar,.7z"
+            disabled={isUploading}
           />
         </CardContent>
       </Card>
@@ -251,14 +298,21 @@ export const FileUpload: React.FC = () => {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-semibold">Uploaded Files ({files.length})</h4>
-              {hasCompletedFiles && (
+              {allFilesCompleted && (
                 <Button 
                   onClick={handleAnalyze}
                   variant="hero"
                   size="sm"
-                  disabled={isUploading}
+                  disabled={isUploading || isAnalyzing}
                 >
-                  Analyze Code
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    'Analyze Code'
+                  )}
                 </Button>
               )}
             </div>
@@ -284,8 +338,14 @@ export const FileUpload: React.FC = () => {
                           {file.status === 'error' && (
                             <AlertCircle className="w-4 h-4 text-destructive" />
                           )}
+                          {file.status === 'uploading' && (
+                            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                          )}
                           <button
-                            onClick={() => removeFile(file.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFile(file.id);
+                            }}
                             className="text-muted-foreground hover:text-destructive transition-colors"
                           >
                             <X className="w-4 h-4" />
@@ -299,11 +359,23 @@ export const FileUpload: React.FC = () => {
                           {formatFileSize(file.size)}
                         </span>
                       </div>
+                      
+                      {file.status === 'error' && (
+                        <p className="text-xs text-destructive mt-1">Upload failed</p>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+            
+            {hasCompletedFiles && !allFilesCompleted && (
+              <div className="mt-4 p-3 bg-warning/10 rounded-lg border border-warning/20">
+                <p className="text-sm text-warning-foreground">
+                  Some files are still uploading. Please wait for all files to complete before analyzing.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

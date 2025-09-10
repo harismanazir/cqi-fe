@@ -1,6 +1,6 @@
 /**
  * API Client for Code Quality Insight Backend
- * Connects React frontend to FastAPI backend
+ * Updated to match the exact backend API structure
  */
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -12,6 +12,69 @@ export interface UploadedFile {
   type: string;
 }
 
+export interface UploadResponse {
+  success: boolean;
+  files: UploadedFile[];
+  upload_dir: string;
+  total_files: number;
+}
+
+// Backend API Response Types (matching the actual backend structure)
+export interface IssueModel {
+  severity: string;
+  title: string;
+  agent: string;
+  file: string;
+  line: number;
+  description: string;
+  fix: string;
+}
+
+export interface AgentPerformance {
+  agent: string;
+  issues: number;
+  time: number;
+  confidence: number;
+  status: string;
+}
+
+export interface BackendAnalysisResult {
+  file: string;
+  language: string;
+  lines: number;
+  total_issues: number;
+  processing_time: number;
+  tokens_used: number;
+  api_calls: number;
+  completed_agents: string[];
+  
+  // Severity breakdown
+  critical_issues: number; 
+  high_issues: number;
+  medium_issues: number;
+  low_issues: number;
+  
+  // Agent performance
+  agent_performance: AgentPerformance[];
+  agent_breakdown: Record<string, number>;
+  
+  // Detailed issues (top 20)
+  detailed_issues: IssueModel[];
+  
+  // Additional metadata
+  timestamp: string;
+  job_id: string;
+}
+
+export interface BackendResultsResponse {
+  success: boolean;
+  job_id: string;
+  results: BackendAnalysisResult[];
+  total_files: number;
+  completion_time: string;
+}
+
+// Frontend display types (transformed from backend data)
 export interface AnalysisResult {
   job_id: string;
   summary: {
@@ -61,9 +124,8 @@ export interface AnalysisStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   message: string;
-  files_processed: number;
-  total_files: number;
   start_time: string;
+  completion_time?: string;
 }
 
 export interface ChatResponse {
@@ -75,7 +137,6 @@ export interface ChatResponse {
     processing_time: number;
     follow_up_suggestions: string[];
     related_files: string[];
-    code_examples: string[];
   };
   timestamp: string;
 }
@@ -85,9 +146,8 @@ export interface ChatSession {
   session_id: string;
   message: string;
   codebase_info: {
-    files: number;
-    languages: string[];
-    total_lines: number;
+    path: string;
+    status: string;
   };
 }
 
@@ -101,7 +161,7 @@ class ApiClient {
   /**
    * Upload files to backend
    */
-  async uploadFiles(files: File[]): Promise<{ files: UploadedFile[]; upload_dir: string }> {
+  async uploadFiles(files: File[]): Promise<UploadResponse> {
     const formData = new FormData();
     
     files.forEach((file) => {
@@ -122,22 +182,15 @@ class ApiClient {
   }
 
   /**
-   * Start analysis job
+   * Start analysis job - Updated to match backend exactly
    */
-  async startAnalysis(filePaths: string[], jobId?: string): Promise<{ job_id: string; status: string; message: string }> {
-    const finalJobId =
-    jobId ||
-    (window.crypto?.randomUUID
-      ? window.crypto.randomUUID()
-      : 'job-' + Math.random().toString(36).substring(2, 15));
-    
-    const response = await fetch(`${this.baseURL}/api/analyze/${finalJobId}`, {
+  async startAnalysis(filePaths: string[], jobId: string): Promise<{ success: boolean; job_id: string; results_count: number }> {
+    const response = await fetch(`${this.baseURL}/api/analyze/${jobId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        job_id: jobId || "",
         file_paths: filePaths,
         detailed: true,
         rag: true,
@@ -167,7 +220,7 @@ class ApiClient {
   }
 
   /**
-   * Get analysis results
+   * Get analysis results and transform to frontend format
    */
   async getAnalysisResults(jobId: string): Promise<AnalysisResult> {
     const response = await fetch(`${this.baseURL}/api/results/${jobId}`);
@@ -177,26 +230,109 @@ class ApiClient {
       throw new Error(error.detail || 'Failed to get results');
     }
 
-    return response.json();
+    const backendData: BackendResultsResponse = await response.json();
+    
+    // Transform backend data to frontend format
+    return this.transformBackendResults(backendData);
   }
+
+  
+private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
+  const results = backendData.results;
+  
+  // Calculate totals
+  const totalFiles = results.length;
+  const totalIssues = results.reduce((sum, file) => sum + file.total_issues, 0);
+  
+  // FIXED: Separate critical from high issues
+  const totalCriticalIssues = results.reduce((sum, file) => {
+    // Count critical issues from detailed_issues
+    const criticalCount = file.detailed_issues.filter(issue => 
+      issue.severity.toLowerCase() === 'critical'
+    ).length;
+    return sum + criticalCount;
+  }, 0);
+  
+  const totalHighIssues = results.reduce((sum, file) => sum + file.high_issues, 0);
+  const totalMediumIssues = results.reduce((sum, file) => sum + file.medium_issues, 0);
+  const totalLowIssues = results.reduce((sum, file) => sum + file.low_issues, 0);
+  
+  // FIXED: Calculate agent breakdown with correct mapping
+  // const agentBreakdown: Record<string, number> = {};
+  // results.forEach(file => {
+  //   file.agent_performance.forEach(agent => {
+  //     const agentKey = agent.agent.toLowerCase();
+  //     if (!agentBreakdown[agentKey]) {
+  //       agentBreakdown[agentKey] = 0;
+  //     }
+  //     agentBreakdown[agentKey] += agent.issues;
+  //   });
+  // });
+
+  const agentBreakdown = results.length > 0 ? results[0].agent_breakdown : {};
+
+  // Transform file results
+  const files: FileResult[] = results.map(file => ({
+    file: file.file,
+    path: file.file,
+    language: file.language,
+    lines: file.lines,
+    issues_count: file.total_issues,
+    issues: file.detailed_issues.map(issue => ({
+      title: issue.title,
+      description: issue.description,
+      severity: issue.severity,
+      agent: issue.agent,
+      line: issue.line,
+      suggestion: issue.fix,
+      file: issue.file
+    }))
+  }));
+
+  // Calculate metrics (simplified scoring based on issues)
+  const securityIssues = agentBreakdown.security || 0;
+  const performanceIssues = agentBreakdown.performance || 0;
+  const complexityIssues = agentBreakdown.complexity || 0;
+  const documentationIssues = agentBreakdown.documentation || 0;
+
+  return {
+    job_id: backendData.job_id,
+    summary: {
+      total_files: totalFiles,
+      total_issues: totalIssues,
+      severity_breakdown: {
+        critical: totalCriticalIssues,  // FIXED: Add critical separately
+        high: totalHighIssues,
+        medium: totalMediumIssues,
+        low: totalLowIssues,
+      },
+      agent_breakdown: agentBreakdown,
+      overall_score: Math.max(0, 100 - (totalIssues * 2)), // Simple scoring
+    },
+    metrics: {
+      security_score: Math.max(0, 100 - (securityIssues * 5)),
+      performance_score: Math.max(0, 100 - (performanceIssues * 4)),
+      code_quality_score: Math.max(0, 100 - (complexityIssues * 3)),
+      documentation_score: Math.max(0, 100 - (documentationIssues * 2)),
+    },
+    files,
+    analysis_time: results.reduce((sum, file) => sum + file.processing_time, 0),
+    timestamp: backendData.completion_time,
+  };
+}
 
   /**
    * Start chat session
    */
   async startChatSession(uploadDir?: string): Promise<ChatSession> {
-    const payload: any = {};
-    
-    // Only include upload_dir if provided
-    if (uploadDir) {
-      payload.upload_dir = uploadDir;
-    }
-
     const response = await fetch(`${this.baseURL}/api/chat/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        upload_dir: uploadDir || '',
+      }),
     });
 
     if (!response.ok) {

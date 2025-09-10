@@ -97,7 +97,7 @@ const Landing = () => {
 
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button 
+            {/* <Button 
               variant="hero" 
               size="lg"
               onClick={() => navigate('/dashboard')}
@@ -105,7 +105,7 @@ const Landing = () => {
             >
               Start Analyzing
               <ArrowRight className="w-5 h-5" />
-            </Button>
+            </Button> */}
             <Button variant="outline" size="lg" className="min-w-[200px]">
               View Sample Report
             </Button>
