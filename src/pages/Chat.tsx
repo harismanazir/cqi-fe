@@ -31,11 +31,330 @@ interface Message {
   language?: string;
 }
 
+interface TypingMessageProps {
+  content: string;
+  onComplete?: () => void;
+  speed?: number;
+}
+
+const TypingMessage: React.FC<TypingMessageProps> = ({ 
+  content, 
+  onComplete, 
+  speed = 15 
+}) => {
+  const [displayedContent, setDisplayedContent] = useState('');
+  const [isTyping, setIsTyping] = useState(true);
+
+  useEffect(() => {
+    if (!content) return;
+
+    let index = 0;
+    const timer = setInterval(() => {
+      if (index < content.length) {
+        setDisplayedContent(content.slice(0, index + 1));
+        index++;
+      } else {
+        setIsTyping(false);
+        clearInterval(timer);
+        onComplete?.();
+      }
+    }, speed);
+
+    return () => clearInterval(timer);
+  }, [content, speed, onComplete]);
+
+  return (
+    <div className="relative">
+      {formatMessage(displayedContent)}
+      {isTyping && (
+        <span className="inline-block w-0.5 h-5 bg-blue-500 animate-pulse ml-1" />
+      )}
+    </div>
+  );
+};
+
+// Enhanced markdown processing function
+const processMarkdownContent = (text: string) => {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentList: React.ReactNode[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      const ListComponent = listType === 'ol' ? 'ol' : 'ul';
+      elements.push(
+        <ListComponent key={elements.length} className="my-3 ml-4 space-y-1">
+          {currentList}
+        </ListComponent>
+      );
+      currentList = [];
+      listType = null;
+    }
+  };
+
+  lines.forEach((line, lineIndex) => {
+    const trimmedLine = line.trim();
+
+    // Skip empty lines
+    if (!trimmedLine) {
+      flushList();
+      if (elements.length > 0) {
+        elements.push(<div key={`space-${lineIndex}`} className="h-2" />);
+      }
+      return;
+    }
+
+    // Headers
+    if (trimmedLine.startsWith('### ')) {
+      flushList();
+      elements.push(
+        <h4 key={lineIndex} className="text-base font-semibold mt-6 mb-3 text-blue-600 dark:text-blue-400 border-l-4 border-blue-500 pl-3">
+          {processInlineFormatting(trimmedLine.replace('### ', ''))}
+        </h4>
+      );
+      return;
+    }
+    
+    if (trimmedLine.startsWith('## ')) {
+      flushList();
+      elements.push(
+        <h3 key={lineIndex} className="text-lg font-semibold mt-6 mb-3 text-blue-700 dark:text-blue-300 border-l-4 border-blue-600 pl-3">
+          {processInlineFormatting(trimmedLine.replace('## ', ''))}
+        </h3>
+      );
+      return;
+    }
+    
+    if (trimmedLine.startsWith('# ')) {
+      flushList();
+      elements.push(
+        <h2 key={lineIndex} className="text-xl font-bold mt-6 mb-4 text-blue-800 dark:text-blue-200 border-l-4 border-blue-700 pl-3">
+          {processInlineFormatting(trimmedLine.replace('# ', ''))}
+        </h2>
+      );
+      return;
+    }
+
+    // Bullet points
+    if (trimmedLine.match(/^[-*•]\s/)) {
+      if (listType !== 'ul') {
+        flushList();
+        listType = 'ul';
+      }
+      const content = trimmedLine.replace(/^[-*•]\s/, '');
+      currentList.push(
+        <li key={`ul-${lineIndex}`} className="flex items-start gap-2">
+          <span className="text-blue-500 mt-1">•</span>
+          <span>{processInlineFormatting(content)}</span>
+        </li>
+      );
+      return;
+    }
+
+    // Numbered lists
+    if (trimmedLine.match(/^\d+\.\s/)) {
+      if (listType !== 'ol') {
+        flushList();
+        listType = 'ol';
+      }
+      const content = trimmedLine.replace(/^\d+\.\s/, '');
+      currentList.push(
+        <li key={`ol-${lineIndex}`} className="flex items-start gap-2">
+          <span className="text-blue-500 font-medium">{currentList.length + 1}.</span>
+          <span>{processInlineFormatting(content)}</span>
+        </li>
+      );
+      return;
+    }
+
+    // Regular paragraphs
+    flushList();
+    if (trimmedLine) {
+      elements.push(
+        <p key={lineIndex} className="mb-3 leading-relaxed">
+          {processInlineFormatting(trimmedLine)}
+        </p>
+      );
+    }
+  });
+
+  flushList(); // Flush any remaining list items
+  return elements;
+};
+
+// Process inline formatting (bold, italic, etc.)
+// Process inline formatting (bold, italic, etc.)
+const processInlineFormatting = (text: string) => {
+  // Handle bold text **text**
+  let processed = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900 dark:text-gray-100">$1</strong>');
+  
+  // Handle italic text *text*
+  processed = processed.replace(/\*(.*?)\*/g, '<em class="italic text-gray-800 dark:text-gray-200">$1</em>');
+  
+  // Handle inline code `code` - IMPORTANT: Do this BEFORE file path processing
+  processed = processed.replace(/`(.*?)`/g, '<code class="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono text-red-600 dark:text-red-400">$1</code>');
+  
+  // FIXED: More specific file path regex that won't break long paths
+  // Only match simple filenames like "file.txt", "component.tsx", etc., not full paths
+  processed = processed.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z]{1,4})\b(?![^<]*>)/g, '<span class="font-mono text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">$1</span>');
+  
+  return <span dangerouslySetInnerHTML={{ __html: processed }} />;
+};
+
+// Enhanced formatMessage function with proper styling
+const formatMessage = (content: string) => {
+  // Split content by code blocks first
+  const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
+  const parts = content.split(codeBlockRegex);
+  
+  return parts.map((part, index) => {
+    if (index % 3 === 1) {
+      // This is a language identifier
+      return null;
+    } else if (index % 3 === 2) {
+      // This is code content
+      const language = parts[index - 1] || 'code';
+      return (
+        <div key={index} className="my-4">
+          <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded-t-lg border">
+            <Badge variant="outline" className="text-xs font-mono">
+              {language}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigator.clipboard.writeText(part)}
+              className="h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-700"
+            >
+              <Copy className="w-3 h-3" />
+            </Button>
+          </div>
+          <pre className="bg-slate-50 dark:bg-slate-900 p-4 rounded-b-lg overflow-x-auto border border-t-0 font-mono text-sm">
+            <code>{part}</code>
+          </pre>
+        </div>
+      );
+    } else {
+      // Regular text content - enhanced markdown processing
+      return (
+        <div key={index} className="prose prose-sm max-w-none dark:prose-invert">
+          {processMarkdownContent(part)}
+        </div>
+      );
+    }
+  });
+};
+
+// Enhanced Message Component
+interface MessageProps {
+  message: Message;
+  isTyping?: boolean;
+  onTypingComplete?: () => void;
+}
+
+const MessageComponent: React.FC<MessageProps> = ({ message, isTyping = false, onTypingComplete }) => {
+  const [showActions, setShowActions] = useState(false);
+  const { toast } = useToast();
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied!",
+      description: "Message copied to clipboard.",
+    });
+  };
+
+  return (
+    <div
+      className={`flex gap-4 ${
+        message.role === 'user' ? 'justify-end' : 'justify-start'
+      }`}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
+    >
+      {message.role === 'assistant' && (
+        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg">
+          <Bot className="w-5 h-5 text-white" />
+        </div>
+      )}
+      
+      <div
+        className={`max-w-4xl relative group ${
+          message.role === 'user'
+            ? 'bg-blue-500 text-white shadow-lg'
+            : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm'
+        } rounded-2xl px-6 py-4`}
+      >
+        <div className={`text-sm leading-7 ${
+          message.role === 'assistant' ? 'text-gray-800 dark:text-gray-200' : 'text-white'
+        }`}>
+          {isTyping && message.role === 'assistant' ? (
+            <TypingMessage content={message.content} speed={15} onComplete={onTypingComplete} />
+          ) : (
+            formatMessage(message.content)
+          )}
+        </div>
+        
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200 dark:border-gray-600 border-opacity-50">
+          <span className="text-xs opacity-60">
+            {message.timestamp.toLocaleTimeString()}
+          </span>
+          <div className={`flex items-center gap-2 transition-opacity duration-200 ${
+            showActions ? 'opacity-100' : 'opacity-0'
+          }`}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(message.content)}
+              className="h-6 w-6 p-0 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <Copy className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {/* Add regenerate functionality */}}
+              className="h-6 w-6 p-0 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <RefreshCw className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
+      
+      {message.role === 'user' && (
+        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+          <User className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
-      content: "Hi! I'm your AI code assistant. I can help you analyze your codebase, explain functions, suggest improvements, find security issues, and answer any questions about your code. What would you like to know?",
+      content: `# Welcome to AI Code Assistant!
+
+I'm here to help you analyze your codebase and answer questions about your **LangGraph analysis results**. I can assist with:
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+## Getting Started:
+
+Ask me anything about your uploaded code! I have context about your files and can provide specific, actionable insights.
+
+**Example questions:**
+- "What security issues did you find?"
+- "How can I improve performance?"
+- "Which files need the most attention?"`,
       role: 'assistant',
       timestamp: new Date()
     }
@@ -44,6 +363,7 @@ const Chat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [isInitializing, setIsInitializing] = useState(true);
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
@@ -75,7 +395,22 @@ const Chat = () => {
         if (result.codebase_info?.path && result.codebase_info.path !== '.') {
           setMessages([{
             id: 'welcome',
-            content: `Hi! I'm your AI code assistant. I've connected to your uploaded codebase and I'm ready to help you analyze your code, explain functions, suggest improvements, find security issues, and answer any questions. What would you like to know?`,
+            content: `# AI Code Assistant Connected!
+
+I've successfully connected to your uploaded codebase and I'm ready to help you analyze your code.
+
+## Your Codebase:
+- **Location**: \`${result.codebase_info.path}\`
+- **Status**: ${result.codebase_info.status}
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+Ask me anything about your code! I have full context and can provide specific, actionable insights.`,
             role: 'assistant',
             timestamp: new Date()
           }]);
@@ -108,22 +443,22 @@ const Chat = () => {
     {
       icon: Shield,
       text: "Find security vulnerabilities in my code",
-      color: "text-destructive bg-destructive/10"
+      color: "text-red-600 bg-red-50 border-red-200"
     },
     {
       icon: Zap,
       text: "How can I improve performance?",
-      color: "text-warning bg-warning/10"
+      color: "text-orange-600 bg-orange-50 border-orange-200"
     },
     {
       icon: Code,
       text: "Explain this function to me",
-      color: "text-primary bg-primary/10"
+      color: "text-blue-600 bg-blue-50 border-blue-200"
     },
     {
       icon: FileSearch,
       text: "Review my code quality",
-      color: "text-success bg-success/10"
+      color: "text-green-600 bg-green-50 border-green-200"
     }
   ];
 
@@ -132,167 +467,174 @@ const Chat = () => {
     const message = userMessage.toLowerCase();
     
     if (message.includes('security') || message.includes('vulnerabilit')) {
-      return `I've analyzed your codebase for security vulnerabilities based on the LangGraph multi-agent analysis. Here are the key findings:
+      return `## Security Analysis Results
 
-## 🔒 Security Analysis Results
+Based on the **LangGraph multi-agent analysis**, here are the key security findings:
 
 ### Critical/High Issues Found:
-- **Hardcoded Credentials**: API keys found directly in code files
-  - **Location**: Line 13 in main configuration files
-  - **Risk**: Exposure of sensitive credentials
-  - **Fix**: Use environment variables or secure secrets management
 
-- **Input Validation Issues**: Unvalidated user input detected
-  - **Location**: Multiple endpoints and functions
-  - **Risk**: Potential injection attacks
-  - **Fix**: Implement proper input sanitization and validation
+**Hardcoded Credentials Detected**
+- **Location**: Line 13 in main configuration files
+- **Risk Level**: **Critical**
+- **Description**: API keys found directly in code files
+- **Impact**: Exposure of sensitive credentials to version control
 
-### Recommendations:
-1. **Immediate**: Move all hardcoded secrets to environment variables
-2. **Short-term**: Implement comprehensive input validation
-3. **Long-term**: Add security scanning to your CI/CD pipeline
+**Input Validation Issues**
+- **Location**: Multiple endpoints and functions  
+- **Risk Level**: **High**
+- **Description**: Unvalidated user input detected
+- **Impact**: Potential injection attacks (SQL, XSS, Command)
 
-Would you like me to dive deeper into any specific security issue or provide code examples for the fixes?`;
+### Immediate Action Required:
+
+1. **Move secrets to environment variables**
+   \`\`\`python
+   # Instead of:
+   API_KEY = "sk-1234567890abcdef"
+   
+   # Use:
+   import os
+   API_KEY = os.getenv('API_KEY')
+   \`\`\`
+
+2. **Implement input validation**
+3. **Add security scanning to CI/CD pipeline**
+
+### Questions for you:
+- Would you like me to show you how to fix the hardcoded credentials?
+- Should I explain how to implement proper input validation?
+- Do you want details about setting up automated security scanning?`;
     }
     
     if (message.includes('performance') || message.includes('optimize')) {
-      return `## ⚡ Performance Analysis Complete!
+      return `## Performance Analysis Complete
 
-Based on the LangGraph Performance Agent analysis, here are the optimization opportunities:
+The **LangGraph Performance Agent** identified several optimization opportunities:
 
 ### High Impact Improvements:
-1. **Inefficient String Operations** - Multiple instances found
-   - Use f-strings or join() methods instead of concatenation
-   - Potential 40-60% performance improvement
 
-2. **Unnecessary Object Creation** - Resource waste detected
-   - Cache frequently created objects
-   - Implement object pooling for heavy operations
+**Inefficient String Operations**
+- **Issue**: Multiple string concatenations detected
+- **Impact**: 40-60% performance improvement possible
+- **Solution**: Use f-strings or \`join()\` methods
 
-3. **I/O Bottlenecks** - Blocking operations identified
-   - Implement async/await patterns
-   - Add connection pooling for database operations
+\`\`\`python
+# Instead of:
+result = ""
+for item in items:
+    result += str(item) + ", "
+
+# Use:
+result = ", ".join(str(item) for item in items)
+\`\`\`
+
+**Unnecessary Object Creation**
+- **Issue**: Heavy objects created repeatedly
+- **Impact**: High memory usage and GC pressure
+- **Solution**: Implement object pooling or caching
+
+**I/O Bottlenecks**
+- **Issue**: Blocking operations identified
+- **Solution**: Implement async/await patterns
 
 ### Performance Metrics:
-- **Current Processing Time**: ~19.14s for analysis
+- **Current Processing Time**: ~19.14s
 - **Optimization Potential**: Up to 50% improvement
-- **Memory Usage**: Can be reduced by 30% with object caching
+- **Memory Usage**: Can be reduced by 30%
 
-Would you like specific code examples for implementing these optimizations?`;
+### Questions for you:
+- Which optimization should we tackle first?
+- Would you like code examples for async implementation?
+- Should I analyze specific functions for performance?`;
     }
     
     if (message.includes('quality') || message.includes('review') || message.includes('complexity')) {
-      return `## 📊 Code Quality Assessment
+      return `## Code Quality Assessment
 
-Based on the LangGraph multi-agent analysis (Security, Performance, Complexity, Documentation):
+**LangGraph Multi-Agent Analysis Results**:
 
-### Overall Analysis Results:
+### Overall Analysis:
 - **Files Analyzed**: Multiple code files processed
-- **Total Issues Found**: 21 issues across all categories
+- **Total Issues**: **21 issues** across all categories  
 - **Processing Time**: 19.14 seconds
-- **LLM Tokens Used**: 3,456 tokens
+- **Confidence Level**: 85% average
 
-### Agent Results Breakdown:
-- **Security Agent**: 3 issues found (confidence: 90%)
-- **Complexity Agent**: 5 issues found (confidence: 85%)  
-- **Performance Agent**: 3 issues found (confidence: 80%)
-- **Documentation Agent**: 10 issues found (confidence: 80%)
+### Issue Breakdown by Agent:
 
-### Issue Severity Distribution:
-- **High Priority**: 3 issues requiring immediate attention
-- **Medium Priority**: 9 issues for next sprint
-- **Low Priority**: 9 issues for future improvement
+| Agent | Issues Found | Confidence |
+|-------|-------------|-----------|
+| **Security** | 3 issues | 90% |
+| **Performance** | 3 issues | 80% |
+| **Complexity** | 5 issues | 85% |
+| **Documentation** | 10 issues | 80% |
 
-### Top Complexity Issues:
-1. **High Cyclomatic Complexity** - Functions with too many conditional paths
-2. **Long Functions/Methods** - Break into smaller, focused functions
-3. **Deep Nesting Levels** - Simplify conditional logic
-4. **Too Many Parameters** - Use data structures or builder patterns
+### Priority Issues:
 
-Would you like detailed recommendations for any specific area?`;
-    }
-    
-    if (message.includes('documentation') || message.includes('comment')) {
-      return `## 📚 Documentation Analysis Results
+**High Complexity Functions**
+- Functions with cyclomatic complexity > 10
+- **Recommendation**: Break into smaller, focused functions
 
-The Documentation Agent found several areas for improvement:
+**Missing Documentation**
+- 10 functions lack proper docstrings
+- **Impact**: Reduced maintainability
 
-### Missing Documentation Issues:
-- **10 total documentation issues found**
-- **Functions lacking docstrings**: Multiple public methods need documentation
-- **Unclear variable names**: Several variables could be more descriptive
+**Deep Nesting Issues**
+- Multiple functions with >4 nesting levels
+- **Solution**: Extract guard clauses and early returns
 
-### Specific Findings:
-1. **Missing Function Documentation**:
-   \`\`\`python
-   # Current - lacks documentation
-   def retrieve_docs(query):
-       # implementation
-   
-   # Recommended - add comprehensive docstring
-   def retrieve_docs(query: str) -> List[Document]:
-       \"\"\"
-       Retrieve relevant documents based on search query.
-       
-       Args:
-           query (str): The search query string
-           
-       Returns:
-           List[Document]: List of matching documents
-           
-       Raises:
-           ValueError: If query is empty or invalid
-       \"\"\"
-   \`\`\`
-
-2. **Variable Naming Issues**:
-   - \`llm_model\` → \`language_model\` or \`llm_client\`
-   - \`documents\` → \`retrieved_documents\`
-   - \`context\` → \`formatted_context\`
-
-### Documentation Score: 65/100
-**Improvement Potential**: +35 points with proper documentation
-
-Would you like me to help you write documentation for specific functions?`;
+### Questions for you:
+- Which complexity issues should we address first?
+- Would you like help writing documentation for specific functions?
+- Should I show you refactoring examples?`;
     }
     
     // Default comprehensive response
-    return `I'm here to help you analyze your code using the LangGraph multi-agent system! Based on your uploaded files, I can provide insights from:
+    return `## AI Code Assistant Ready!
 
-## 🤖 Available Analysis Agents:
+I'm here to help you with your **LangGraph multi-agent analysis results**. Based on your uploaded files, I can provide insights from multiple specialized agents:
 
-**🔒 Security Agent** - Finds vulnerabilities like:
-- Hardcoded credentials and secrets
+### Available Analysis Agents:
+
+**Security Agent** 🛡️
+- Hardcoded credentials detection
 - Input validation issues  
 - Authentication/authorization flaws
-- SQL injection risks
+- SQL injection and XSS risks
 
-**⚡ Performance Agent** - Identifies bottlenecks:
-- Inefficient string operations
-- Unnecessary object creation
-- I/O performance issues
-- Memory usage problems
+**Performance Agent** ⚡
+- Inefficient algorithms and operations
+- Memory usage optimization
+- I/O bottleneck identification
+- Async/await implementation suggestions
 
-**📊 Complexity Agent** - Analyzes code structure:
-- Cyclomatic complexity issues
-- Long functions needing refactoring
-- Deep nesting problems
-- Parameter count issues
+**Complexity Agent** 📊
+- Cyclomatic complexity analysis
+- Function length and parameter count
+- Nesting depth issues
+- SOLID principle violations
 
-**📚 Documentation Agent** - Reviews documentation:
+**Documentation Agent** 📚
 - Missing function docstrings
-- Unclear variable names
-- Code comment quality
+- Unclear variable naming
 - API documentation gaps
+- Code comment quality
 
-## 💡 What I can help you with:
-- Explain specific functions or code blocks
-- Provide refactoring suggestions
-- Security vulnerability details
-- Performance optimization tips
-- Code quality improvements
+### How I can help:
 
-Feel free to ask about any specific aspect of your code, paste code snippets for review, or ask for general development advice!`;
+- **Explain specific code sections** with context
+- **Provide refactoring suggestions** with examples
+- **Security vulnerability details** and fixes
+- **Performance optimization recommendations**
+- **Code quality improvement strategies**
+
+### Get Started:
+
+Ask me about any aspect of your code, paste code snippets for review, or request general development advice. I have full context of your codebase!
+
+**Popular questions:**
+- "What are the most critical security issues?"
+- "How can I optimize this slow function?"
+- "Which files need immediate attention?"`;
   };
 
   const handleSendMessage = async (content?: string) => {
@@ -331,6 +673,7 @@ Feel free to ask about any specific aspect of your code, paste code snippets for
         assistantContent = getEnhancedResponse(messageContent);
       }
 
+      // Create assistant message with typing effect
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: assistantContent,
@@ -338,28 +681,45 @@ Feel free to ask about any specific aspect of your code, paste code snippets for
         timestamp: new Date()
       };
 
+      setTypingMessageId(assistantMessage.id);
       setMessages(prev => [...prev, assistantMessage]);
+      setIsLoading(false);
       
     } catch (error) {
       console.error('Chat error:', error);
+      setIsLoading(false);
       
-      // Fallback to enhanced demo response on error
-      const assistantMessage: Message = {
+      // Enhanced error handling with proper formatting
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: getEnhancedResponse(messageContent),
+        content: `## Connection Error
+
+I apologize, but I encountered an error while processing your question. 
+
+### What happened:
+- Connection to the backend may be interrupted
+- The analysis system might be temporarily unavailable
+- Network connectivity issues
+
+### What you can do:
+
+1. **Refresh and try again** - Sometimes a simple refresh resolves the issue
+2. **Check your connection** - Ensure you have stable internet
+3. **Try a different question** - The issue might be specific to your query
+4. **Contact support** - If the problem persists
+
+I'm still here to help using demo responses while we resolve this issue!`,
         role: 'assistant',
         timestamp: new Date()
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      setMessages(prev => [...prev, errorMessage]);
       
       toast({
         title: "Using Demo Mode",
         description: "Connected to demo responses due to backend error.",
         variant: "destructive"
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -370,253 +730,148 @@ Feel free to ask about any specific aspect of your code, paste code snippets for
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Copied!",
-      description: "Message copied to clipboard.",
-    });
+  const handleTypingComplete = () => {
+    setTypingMessageId(null);
   };
 
-  const formatMessage = (content: string) => {
-    // Enhanced code block detection and formatting
-    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-    const parts = content.split(codeBlockRegex);
+// Replace the main component structure in your Chat.tsx with this:
+
+return (
+  <div className="h-screen bg-gray-50 dark:bg-gray-900 flex">
+    <Sidebar />
     
-    return parts.map((part, index) => {
-      if (index % 3 === 1) {
-        // This is a language identifier
-        return null;
-      } else if (index % 3 === 2) {
-        // This is code content
-        const language = parts[index - 1] || 'code';
-        return (
-          <div key={index} className="my-4">
-            <div className="flex items-center justify-between bg-muted/50 px-3 py-2 rounded-t-lg border">
-              <Badge variant="outline" className="text-xs">
-                {language}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => copyToClipboard(part)}
-                className="h-6 w-6 p-0"
-              >
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-            <pre className="bg-muted p-4 rounded-b-lg overflow-x-auto border border-t-0">
-              <code className="text-sm">{part}</code>
-            </pre>
+    <main className="flex-1 flex flex-col bg-white dark:bg-gray-900">
+      {/* Enhanced Header - Fixed Height */}
+      <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent flex items-center gap-2">
+              <MessageSquare className="w-6 h-6 text-blue-600" />
+              AI Code Assistant
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Ask questions about your LangGraph analysis results
+            </p>
           </div>
-        );
-      } else {
-        // This is regular text - handle markdown-style formatting
-        return (
-          <div key={index} className="whitespace-pre-wrap">
-            {part.split('\n').map((line, lineIndex) => {
-              // Handle headers
-              if (line.startsWith('###')) {
-                return <h4 key={lineIndex} className="text-md font-semibold mt-4 mb-2 text-primary">{line.replace('###', '').trim()}</h4>;
-              }
-              if (line.startsWith('##')) {
-                return <h3 key={lineIndex} className="text-lg font-semibold mt-4 mb-2 text-primary">{line.replace('##', '').trim()}</h3>;
-              }
-              if (line.startsWith('#')) {
-                return <h2 key={lineIndex} className="text-xl font-bold mt-4 mb-2 text-primary">{line.replace('#', '').trim()}</h2>;
-              }
-              
-              // Handle bullet points
-              if (line.trim().startsWith('- **') || line.trim().startsWith('* **')) {
-                const content = line.replace(/^[-*]\s*/, '');
-                return <li key={lineIndex} className="ml-4 mb-1 list-disc">{content}</li>;
-              }
-              if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-                return <li key={lineIndex} className="ml-4 mb-1 list-disc">{line.replace(/^[-*]\s*/, '')}</li>;
-              }
-              
-              // Handle numbered lists
-              if (/^\d+\./.test(line.trim())) {
-                return <li key={lineIndex} className="ml-4 mb-1 list-decimal">{line.replace(/^\d+\.\s*/, '')}</li>;
-              }
-              
-              // Handle bold text
-              const boldFormatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-              
-              return (
-                <span key={lineIndex} dangerouslySetInnerHTML={{ __html: boldFormatted }}>
-                </span>
-              );
-            })}
-          </div>
-        );
-      }
-    });
-  };
-
-  return (
-    <div className="min-h-screen bg-background">
-      <div className="flex w-full">
-        <Sidebar />
-        
-        <main className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="border-b border-border p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gradient flex items-center gap-2">
-                  <MessageSquare className="w-6 h-6" />
-                  AI Code Assistant
-                </h1>
-                <p className="text-muted-foreground">Ask questions about your LangGraph analysis results</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setMessages([messages[0]]);
-                  setInputValue('');
-                }}
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                New Chat
-              </Button>
-            </div>
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-4xl mx-auto space-y-6">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-4 ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  {message.role === 'assistant' && (
-                    <div className="w-8 h-8 bg-gradient-primary rounded-full flex items-center justify-center flex-shrink-0">
-                      <Bot className="w-5 h-5 text-white" />
-                    </div>
-                  )}
-                  
-                  <div
-                    className={`max-w-3xl ${
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted/50'
-                    } rounded-2xl p-4 relative group`}
-                  >
-                    <div className="text-sm leading-relaxed">
-                      {formatMessage(message.content)}
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/20">
-                      <span className="text-xs opacity-60">
-                        {message.timestamp.toLocaleTimeString()}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyToClipboard(message.content)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  {message.role === 'user' && (
-                    <div className="w-8 h-8 bg-secondary rounded-full flex items-center justify-center flex-shrink-0">
-                      <User className="w-5 h-5 text-secondary-foreground" />
-                    </div>
-                  )}
-                </div>
-              ))}
-              
-              {isLoading && (
-                <div className="flex gap-4 justify-start">
-                  <div className="w-8 h-8 bg-gradient-primary rounded-full flex items-center justify-center">
-                    <Bot className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="bg-muted/50 rounded-2xl p-4">
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm text-muted-foreground">AI is analyzing your question...</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          {/* Quick Questions */}
-          {messages.length === 1 && (
-            <div className="p-6 border-t border-border bg-muted/20">
-              <div className="max-w-4xl mx-auto">
-                <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-primary" />
-                  Quick Questions
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {quickQuestions.map((question, index) => (
-                    <Button
-                      key={index}
-                      variant="outline"
-                      className="justify-start h-auto p-3 text-left"
-                      onClick={() => handleSendMessage(question.text)}
-                      disabled={isLoading}
-                    >
-                      <div className={`p-2 rounded-lg ${question.color} mr-3`}>
-                        <question.icon className="w-4 h-4" />
-                      </div>
-                      <span className="text-sm">{question.text}</span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Input */}
-          <div className="border-t border-border p-6">
-            <div className="max-w-4xl mx-auto">
-              <div className="flex gap-3">
-                <div className="flex-1 relative">
-                  <Input
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder="Ask me anything about your LangGraph analysis results..."
-                    disabled={isLoading || isInitializing}
-                    className="pr-12 min-h-[3rem] resize-none"
-                  />
-                </div>
-                <Button
-                  onClick={() => handleSendMessage()}
-                  disabled={!inputValue.trim() || isLoading || isInitializing}
-                  variant="hero"
-                  size="lg"
-                  className="px-6"
-                >
-                  {isLoading || isInitializing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2 text-center">
-                Press Enter to send • Shift+Enter for new line {sessionId === 'demo-session' ? '• Demo Mode Active' : ''}
-              </p>
-            </div>
-          </div>
-        </main>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setMessages([messages[0]]);
+              setInputValue('');
+              setTypingMessageId(null);
+            }}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            New Chat
+          </Button>
+        </div>
       </div>
-    </div>
-  );
+
+      {/* Messages Container - Scrollable with Fixed Height */}
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
+          <div className="max-w-4xl mx-auto space-y-6">
+            {messages.map((message) => (
+              <MessageComponent
+                key={message.id}
+                message={message}
+                isTyping={typingMessageId === message.id}
+                onTypingComplete={handleTypingComplete}
+              />
+            ))}
+            
+            {/* Enhanced Loading State */}
+            {isLoading && (
+              <div className="flex gap-4 justify-start">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div className="bg-white dark:bg-gray-800 rounded-2xl px-6 py-4 border border-gray-200 dark:border-gray-700 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      AI is analyzing your question...
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Questions - Conditionally Rendered, Fixed Height */}
+      {messages.length === 1 && (
+        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+          <div className="max-w-4xl mx-auto">
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-blue-500" />
+              Quick Questions
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {quickQuestions.map((question, index) => (
+                <Button
+                  key={index}
+                  variant="outline"
+                  className="justify-start h-auto p-4 text-left hover:shadow-md transition-all"
+                  onClick={() => handleSendMessage(question.text)}
+                  disabled={isLoading}
+                >
+                  <div className={`p-2 rounded-lg ${question.color} mr-3 border`}>
+                    <question.icon className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm">{question.text}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enhanced Input Section - Fixed Height */}
+      <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <Input
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder="Ask me anything about your LangGraph analysis results..."
+                disabled={isLoading || isInitializing}
+                className="min-h-[3rem] pr-12 border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-900"
+              />
+            </div>
+            <Button
+              onClick={() => handleSendMessage()}
+              disabled={!inputValue.trim() || isLoading || isInitializing}
+              className="px-6 bg-blue-500 hover:bg-blue-600 text-white"
+              size="lg"
+            >
+              {isLoading || isInitializing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+            Press Enter to send • Shift+Enter for new line 
+            {sessionId === 'demo-session' ? ' • Demo Mode Active' : ''}
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
+);
 };
 
 export default Chat;
