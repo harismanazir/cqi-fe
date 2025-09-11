@@ -360,7 +360,7 @@ class ApiClient {
     return this.transformBackendResults(backendData);
   }
 
-  private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
+private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
     const results = backendData.results;
     
     // Calculate totals
@@ -368,18 +368,32 @@ class ApiClient {
     const totalIssues = results.reduce((sum, file) => sum + file.total_issues, 0);
     
     // Separate critical from high issues
-    const totalCriticalIssues = results.reduce((sum, file) => {
-      const criticalCount = file.detailed_issues.filter(issue => 
-        issue.severity.toLowerCase() === 'critical'
-      ).length;
-      return sum + criticalCount;
-    }, 0);
-    
+    const totalCriticalIssues = results.reduce((sum, file) => sum + file.critical_issues, 0);
     const totalHighIssues = results.reduce((sum, file) => sum + file.high_issues, 0);
     const totalMediumIssues = results.reduce((sum, file) => sum + file.medium_issues, 0);
     const totalLowIssues = results.reduce((sum, file) => sum + file.low_issues, 0);
     
-    const agentBreakdown = results.length > 0 ? results[0].agent_breakdown : {};
+    // FIXED: Aggregate agent breakdown across all files
+    const agentBreakdown: Record<string, number> = {
+      security: 0,
+      performance: 0,
+      complexity: 0,
+      documentation: 0
+    };
+    
+    // Sum up agent breakdowns from all files
+    results.forEach(file => {
+      if (file.agent_breakdown) {
+        Object.entries(file.agent_breakdown).forEach(([agent, count]) => {
+          const agentKey = agent.toLowerCase();
+          if (agentKey in agentBreakdown) {
+            agentBreakdown[agentKey] += count;
+          }
+        });
+      }
+    });
+    
+    console.log('[API Transform] Agent breakdown aggregated:', agentBreakdown);
 
     // Transform file results
     const files: FileResult[] = results.map(file => ({
@@ -399,13 +413,13 @@ class ApiClient {
       }))
     }));
 
-    // Calculate metrics
+    // Calculate metrics based on aggregated data
     const securityIssues = agentBreakdown.security || 0;
     const performanceIssues = agentBreakdown.performance || 0;
     const complexityIssues = agentBreakdown.complexity || 0;
     const documentationIssues = agentBreakdown.documentation || 0;
 
-    return {
+    const transformedResult = {
       job_id: backendData.job_id,
       summary: {
         total_files: totalFiles,
@@ -416,7 +430,7 @@ class ApiClient {
           medium: totalMediumIssues,
           low: totalLowIssues,
         },
-        agent_breakdown: agentBreakdown,
+        agent_breakdown: agentBreakdown, // Use aggregated breakdown
         overall_score: Math.max(0, 100 - (totalIssues * 2)),
       },
       metrics: {
@@ -428,8 +442,12 @@ class ApiClient {
       files,
       analysis_time: results.reduce((sum, file) => sum + file.processing_time, 0),
       timestamp: backendData.completion_time,
-      github_metadata: backendData.github_metadata, // IMPORTANT: Preserve GitHub metadata including temp_dir
+      github_metadata: backendData.github_metadata,
     };
+    
+    console.log('[API Transform] Final result summary:', transformedResult.summary);
+    
+    return transformedResult;
   }
 
   /**

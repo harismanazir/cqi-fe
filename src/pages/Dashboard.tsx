@@ -539,7 +539,7 @@ const handleStartChat = () => {
                 </Card>
               </div>
 
-              {/* Agent Performance Cards */}
+              {/* Agent Performance Cards - FIXED */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <Card className="hover:shadow-medium transition-all duration-300 border-red-200">
                   <CardContent className="p-6">
@@ -548,12 +548,12 @@ const handleStartChat = () => {
                         <Shield className="w-6 h-6 text-red-600" />
                       </div>
                       <Badge variant="outline" className="text-red-600 border-red-200">
-                        {analysisResults.summary.agent_breakdown.security || 0}
+                        {analysisResults.summary.agent_breakdown?.security ?? 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Security Issues</h3>
                     <div className="text-2xl font-bold text-red-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.security || 0}
+                      {analysisResults.summary.agent_breakdown?.security ?? 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -570,12 +570,12 @@ const handleStartChat = () => {
                         <Zap className="w-6 h-6 text-orange-600" />
                       </div>
                       <Badge variant="outline" className="text-orange-600 border-orange-200">
-                        {analysisResults.summary.agent_breakdown.performance || 0}
+                        {analysisResults.summary.agent_breakdown?.performance ?? 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Performance Issues</h3>
                     <div className="text-2xl font-bold text-orange-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.performance || 0}
+                      {analysisResults.summary.agent_breakdown?.performance ?? 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -592,12 +592,12 @@ const handleStartChat = () => {
                         <BarChart3 className="w-6 h-6 text-blue-600" />
                       </div>
                       <Badge variant="outline" className="text-blue-600 border-blue-200">
-                        {analysisResults.summary.agent_breakdown.complexity || 0}
+                        {analysisResults.summary.agent_breakdown?.complexity ?? 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Complexity Issues</h3>
                     <div className="text-2xl font-bold text-blue-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.complexity || 0}
+                      {analysisResults.summary.agent_breakdown?.complexity ?? 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -614,12 +614,12 @@ const handleStartChat = () => {
                         <FileSearch className="w-6 h-6 text-green-600" />
                       </div>
                       <Badge variant="outline" className="text-green-600 border-green-200">
-                        {analysisResults.summary.agent_breakdown.documentation || 0}
+                        {analysisResults.summary.agent_breakdown?.documentation ?? 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Documentation Issues</h3>
                     <div className="text-2xl font-bold text-green-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.documentation || 0}
+                      {analysisResults.summary.agent_breakdown?.documentation ?? 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
