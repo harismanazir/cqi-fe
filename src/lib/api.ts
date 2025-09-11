@@ -2,7 +2,7 @@
  * Complete API Client for Code Quality Insight Backend with GitHub Integration
  */
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://2ab92dfc51c7.ngrok-free.app';
 
 export interface UploadedFile {
   name: string;
