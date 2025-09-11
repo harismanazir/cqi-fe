@@ -13,12 +13,14 @@ import {
   Clock,
   FileCode,
   CheckCircle,
-  XCircle,
   Code,
   MessageSquare,
   RefreshCw,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  Github,
+  GitBranch,
+  Globe
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiClient, AnalysisResult, AnalysisStatus } from '@/lib/api';
@@ -45,15 +47,22 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  // Get job ID from URL params
+  // Get job ID and context from URL params
   const jobId = searchParams.get('job_id');
   const uploadDir = searchParams.get('upload_dir');
+  const githubRepo = searchParams.get('github_repo');
+  const branch = searchParams.get('branch');
+  
+  // Determine if this is a GitHub analysis
+  const isGitHubAnalysis = Boolean(githubRepo);
 
   // Monitor analysis job if job ID is provided
   useEffect(() => {
     if (!jobId) return;
 
     console.log('[Dashboard] Starting monitoring for job:', jobId);
+    console.log('[Dashboard] GitHub context:', { githubRepo, branch });
+    
     let ws: WebSocket | null = null;
     let statusCheckInterval: NodeJS.Timeout | null = null;
 
@@ -84,12 +93,10 @@ const Dashboard = () => {
             },
             (error) => {
               console.error('WebSocket error:', error);
-              // Fallback to polling if WebSocket fails
               startStatusPolling();
             }
           );
 
-          // Backup status polling
           startStatusPolling();
         }
 
@@ -150,7 +157,9 @@ const Dashboard = () => {
         
         toast({
           title: "Analysis Complete!",
-          description: `Found ${results.summary.total_issues} issues across ${results.summary.total_files} files.`,
+          description: isGitHubAnalysis 
+            ? `GitHub repository analyzed: ${results.summary.total_issues} issues found`
+            : `Found ${results.summary.total_issues} issues across ${results.summary.total_files} files.`,
         });
       } catch (error) {
         console.error('Failed to load results:', error);
@@ -164,58 +173,14 @@ const Dashboard = () => {
 
     startMonitoring();
 
-    // Cleanup
     return () => {
       if (ws) ws.close();
       if (statusCheckInterval) clearInterval(statusCheckInterval);
     };
-  }, [jobId, toast]);
+  }, [jobId, toast, isGitHubAnalysis]);
 
-  // Prepare language distribution data from files
-  const languageData = analysisResults ? 
-    Object.entries(
-      analysisResults.files.reduce((acc, file) => {
-        const lang = file.language || 'unknown';
-        acc[lang] = (acc[lang] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>)
-    ).map(([lang, count]) => ({
-      name: lang.charAt(0).toUpperCase() + lang.slice(1),
-      value: count,
-      color: getLanguageColor(lang)
-    })) : [];
-
-  // Prepare severity distribution data
-  const severityData = analysisResults ? [
-  { name: 'Critical', value: analysisResults.summary.severity_breakdown.critical, color: '#DC2626' },
-  { name: 'High', value: analysisResults.summary.severity_breakdown.high, color: '#EF4444' },
-  { name: 'Medium', value: analysisResults.summary.severity_breakdown.medium, color: '#F59E0B' },
-  { name: 'Low', value: analysisResults.summary.severity_breakdown.low, color: '#10B981' },
-].filter(item => item.value > 0) : [];
-
-  // Prepare agent breakdown data for bar chart
-  const agentData = analysisResults ? 
-    Object.entries(analysisResults.summary.agent_breakdown).map(([agent, count]) => ({
-      name: agent.charAt(0).toUpperCase() + agent.slice(1),
-      issues: count,
-      color: getAgentColor(agent)
-    })) : [];
-
-  // Extract top issues from all files
-  const topIssues = analysisResults ? 
-    analysisResults.files
-      .flatMap(file => file.issues.map(issue => ({
-        ...issue,
-        file: file.file
-      })))
-      .sort((a, b) => {
-        const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-        return (severityOrder[b.severity.toLowerCase() as keyof typeof severityOrder] || 0) - 
-               (severityOrder[a.severity.toLowerCase() as keyof typeof severityOrder] || 0);
-      })
-      .slice(0, 10) : [];
-
-  function getLanguageColor(language: string): string {
+  // Helper functions
+  const getLanguageColor = (language: string): string => {
     const colors: { [key: string]: string } = {
       'javascript': '#F7DF1E',
       'python': '#3776AB',
@@ -230,9 +195,9 @@ const Dashboard = () => {
       'unknown': '#6B7280'
     };
     return colors[language.toLowerCase()] || '#6B7280';
-  }
+  };
 
-  function getAgentColor(agent: string): string {
+  const getAgentColor = (agent: string): string => {
     const colors: { [key: string]: string } = {
       'security': '#EF4444',
       'performance': '#F59E0B',
@@ -240,33 +205,76 @@ const Dashboard = () => {
       'documentation': '#10B981'
     };
     return colors[agent.toLowerCase()] || '#6B7280';
-  }
-
-  const getSeverityColor = (severity: string): string => {
-    switch (severity.toLowerCase()) {
-      case 'critical': return 'bg-red-500';
-      case 'high': return 'bg-red-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'low': return 'bg-green-500';
-      default: return 'bg-gray-500';
-    }
   };
 
   const getSeverityTextColor = (severity: string): string => {
-  switch (severity.toLowerCase()) {
-    case 'critical': return 'text-red-800 border-red-300 bg-red-100';
-    case 'high': return 'text-red-600 border-red-200 bg-red-50';
-    case 'medium': return 'text-yellow-600 border-yellow-200 bg-yellow-50';
-    case 'low': return 'text-green-600 border-green-200 bg-green-50';
-    default: return 'text-gray-600 border-gray-200 bg-gray-50';
-  }
-};
-
-  const handleStartChat = () => {
-    const params = new URLSearchParams();
-    if (uploadDir) {
-      params.set('upload_dir', uploadDir);
+    switch (severity.toLowerCase()) {
+      case 'critical': return 'text-red-800 border-red-300 bg-red-100';
+      case 'high': return 'text-red-600 border-red-200 bg-red-50';
+      case 'medium': return 'text-yellow-600 border-yellow-200 bg-yellow-50';
+      case 'low': return 'text-green-600 border-green-200 bg-green-50';
+      default: return 'text-gray-600 border-gray-200 bg-gray-50';
     }
+  };
+
+  // Prepare chart data
+  const languageData = analysisResults ? 
+    Object.entries(
+      analysisResults.files.reduce((acc, file) => {
+        const lang = file.language || 'unknown';
+        acc[lang] = (acc[lang] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    ).map(([lang, count]) => ({
+      name: lang.charAt(0).toUpperCase() + lang.slice(1),
+      value: count,
+      color: getLanguageColor(lang)
+    })) : [];
+
+  const severityData = analysisResults ? [
+    { name: 'Critical', value: analysisResults.summary.severity_breakdown.critical, color: '#DC2626' },
+    { name: 'High', value: analysisResults.summary.severity_breakdown.high, color: '#EF4444' },
+    { name: 'Medium', value: analysisResults.summary.severity_breakdown.medium, color: '#F59E0B' },
+    { name: 'Low', value: analysisResults.summary.severity_breakdown.low, color: '#10B981' },
+  ].filter(item => item.value > 0) : [];
+
+  const agentData = analysisResults ? 
+    Object.entries(analysisResults.summary.agent_breakdown).map(([agent, count]) => ({
+      name: agent.charAt(0).toUpperCase() + agent.slice(1),
+      issues: count,
+      color: getAgentColor(agent)
+    })) : [];
+
+  const topIssues = analysisResults ? 
+    analysisResults.files
+      .flatMap(file => file.issues.map(issue => ({
+        ...issue,
+        file: file.file
+      })))
+      .sort((a, b) => {
+        const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+        return (severityOrder[b.severity.toLowerCase() as keyof typeof severityOrder] || 0) - 
+               (severityOrder[a.severity.toLowerCase() as keyof typeof severityOrder] || 0);
+      })
+      .slice(0, 10) : [];
+
+  // Event handlers - FIXED to properly handle GitHub context
+  const handleStartChat = () => {
+    console.log('[Dashboard] Starting chat with context:', { isGitHubAnalysis, githubRepo, branch, uploadDir });
+    
+    const params = new URLSearchParams();
+    
+    if (isGitHubAnalysis && githubRepo) {
+      // For GitHub analysis, pass the repo info
+      params.set('github_repo', githubRepo);
+      params.set('branch', branch || 'main');
+      console.log('[Dashboard] Starting chat for GitHub repo:', githubRepo, branch);
+    } else if (uploadDir) {
+      // For file uploads, pass the upload directory
+      params.set('upload_dir', uploadDir);
+      console.log('[Dashboard] Starting chat for upload dir:', uploadDir);
+    }
+    
     navigate(`/chat/new?${params.toString()}`);
   };
 
@@ -292,6 +300,81 @@ const Dashboard = () => {
     }
   };
 
+  // GitHub Repository Header Component
+  const GitHubRepoHeader = () => {
+    if (!githubRepo && !analysisResults?.github_metadata?.repo_url) return null;
+    
+    const repoName = githubRepo || analysisResults?.github_metadata?.repo_url?.split('/').slice(-2).join('/');
+    const repoUrl = analysisResults?.github_metadata?.repo_url || `https://github.com/${githubRepo}`;
+    const repoStats = analysisResults?.github_metadata?.stats;
+    
+    return (
+      <Card className="mb-6 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-black rounded-lg flex items-center justify-center">
+                <Github className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  {repoName}
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={repoUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </Button>
+                </h3>
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  <GitBranch className="w-4 h-4" />
+                  GitHub Repository Analysis • Branch: {branch || 'main'}
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+              <Github className="w-4 h-4 mr-1" />
+              GitHub Integration
+            </Badge>
+          </div>
+          
+          {repoStats && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">{repoStats.total_files}</p>
+                <p className="text-xs text-gray-600 flex items-center justify-center gap-1">
+                  <FileCode className="w-3 h-3" />
+                  Files
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">{repoStats.total_lines.toLocaleString()}</p>
+                <p className="text-xs text-gray-600 flex items-center justify-center gap-1">
+                  <Code className="w-3 h-3" />
+                  Lines of Code
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">
+                  {(repoStats.total_size_bytes / 1024 / 1024).toFixed(1)}MB
+                </p>
+                <p className="text-xs text-gray-600 flex items-center justify-center gap-1">
+                  <Globe className="w-3 h-3" />
+                  Repository Size
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">
+                  {Object.keys(repoStats.language_breakdown).length}
+                </p>
+                <p className="text-xs text-gray-600">Languages</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex w-full">
@@ -304,7 +387,15 @@ const Dashboard = () => {
               <div>
                 <h1 className="text-3xl font-bold text-gradient">Code Analysis Dashboard</h1>
                 <p className="text-muted-foreground mt-1">
-                  LangGraph multi-agent analysis results {analysisResults && `• ${analysisResults.summary.total_files} files analyzed`}
+                  {isGitHubAnalysis ? (
+                    <>
+                      <Github className="w-4 h-4 inline mr-1" />
+                      GitHub Repository Analysis • {githubRepo} ({branch || 'main'})
+                    </>
+                  ) : (
+                    <>LangGraph multi-agent analysis results</>
+                  )}
+                  {analysisResults && ` • ${analysisResults.summary.total_files} files analyzed`}
                   {jobId && ` • Job ID: ${jobId.slice(0, 8)}...`}
                 </p>
               </div>
@@ -329,6 +420,9 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* GitHub Repository Header */}
+          <GitHubRepoHeader />
+
           {/* Analysis Progress */}
           {isAnalyzing && (
             <Card className="mb-6 border-primary/20 shadow-glow animate-pulse-slow">
@@ -336,13 +430,15 @@ const Dashboard = () => {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold flex items-center gap-2">
                     <Clock className="w-5 h-5 animate-spin text-primary" />
-                    Running LangGraph Multi-Agent Analysis
+                    {isGitHubAnalysis ? 'Analyzing GitHub Repository' : 'Running LangGraph Multi-Agent Analysis'}
                   </h3>
                   <span className="text-sm text-muted-foreground">{Math.round(analysisProgress)}%</span>
                 </div>
                 <Progress value={analysisProgress} className="mb-3 h-2" />
                 <p className="text-sm text-muted-foreground">
-                  {analysisMessage || "Security, Performance, Complexity, and Documentation agents analyzing your code..."}
+                  {analysisMessage || (isGitHubAnalysis 
+                    ? `Downloading and analyzing repository: ${githubRepo}...` 
+                    : "Security, Performance, Complexity, and Documentation agents analyzing your code...")}
                 </p>
                 
                 <div className="mt-4 grid grid-cols-4 gap-4 text-center">
@@ -362,25 +458,6 @@ const Dashboard = () => {
                     <FileSearch className="w-5 h-5 text-green-600 mx-auto mb-1" />
                     <p className="text-xs text-green-600 font-medium">Documentation</p>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Debug Info - Remove this in production */}
-          {jobId && (
-            <Card className="mb-6 border-blue-200 bg-blue-50">
-              <CardContent className="p-4">
-                <h4 className="font-medium text-blue-800 mb-2">Debug Info</h4>
-                <div className="text-sm text-blue-700 space-y-1">
-                  <p><strong>Job ID:</strong> {jobId}</p>
-                  <p><strong>Upload Dir:</strong> {uploadDir || 'Not provided'}</p>
-                  <p><strong>Analysis Status:</strong> {isAnalyzing ? 'Running' : 'Not running'}</p>
-                  <p><strong>Progress:</strong> {analysisProgress}%</p>
-                  <p><strong>Has Results:</strong> {analysisResults ? 'Yes' : 'No'}</p>
-                  {analysisResults && (
-                    <p><strong>Total Issues:</strong> {analysisResults.summary.total_issues}</p>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -469,12 +546,12 @@ const Dashboard = () => {
                         <Shield className="w-6 h-6 text-red-600" />
                       </div>
                       <Badge variant="outline" className="text-red-600 border-red-200">
-                        {analysisResults.summary.agent_breakdown.security || analysisResults.summary.agent_breakdown.Security || 0}
+                        {analysisResults.summary.agent_breakdown.security || 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Security Issues</h3>
                     <div className="text-2xl font-bold text-red-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.security || analysisResults.summary.agent_breakdown.Security || 0}
+                      {analysisResults.summary.agent_breakdown.security || 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -491,12 +568,12 @@ const Dashboard = () => {
                         <Zap className="w-6 h-6 text-orange-600" />
                       </div>
                       <Badge variant="outline" className="text-orange-600 border-orange-200">
-                        {analysisResults.summary.agent_breakdown.performance || analysisResults.summary.agent_breakdown.Performance || 0}
+                        {analysisResults.summary.agent_breakdown.performance || 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Performance Issues</h3>
                     <div className="text-2xl font-bold text-orange-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.performance || analysisResults.summary.agent_breakdown.Performance || 0}
+                      {analysisResults.summary.agent_breakdown.performance || 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -513,12 +590,12 @@ const Dashboard = () => {
                         <BarChart3 className="w-6 h-6 text-blue-600" />
                       </div>
                       <Badge variant="outline" className="text-blue-600 border-blue-200">
-                        {analysisResults.summary.agent_breakdown.complexity || analysisResults.summary.agent_breakdown.Complexity || 0}
+                        {analysisResults.summary.agent_breakdown.complexity || 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Complexity Issues</h3>
                     <div className="text-2xl font-bold text-blue-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.complexity || analysisResults.summary.agent_breakdown.Complexity || 0}
+                      {analysisResults.summary.agent_breakdown.complexity || 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -535,12 +612,12 @@ const Dashboard = () => {
                         <FileSearch className="w-6 h-6 text-green-600" />
                       </div>
                       <Badge variant="outline" className="text-green-600 border-green-200">
-                        {analysisResults.summary.agent_breakdown.documentation || analysisResults.summary.agent_breakdown.Documentation || 0}
+                        {analysisResults.summary.agent_breakdown.documentation || 0}
                       </Badge>
                     </div>
                     <h3 className="font-semibold text-sm text-muted-foreground">Documentation Issues</h3>
                     <div className="text-2xl font-bold text-green-600 mt-1">
-                      {analysisResults.summary.agent_breakdown.documentation || analysisResults.summary.agent_breakdown.Documentation || 0}
+                      {analysisResults.summary.agent_breakdown.documentation || 0}
                     </div>
                     <div className="mt-2">
                       <Badge variant="outline" className="text-xs">
@@ -748,7 +825,9 @@ const Dashboard = () => {
                 <Clock className="w-16 h-16 mx-auto text-yellow-600" />
                 <h3 className="text-lg font-semibold text-yellow-800">Waiting for Analysis Results</h3>
                 <p className="text-yellow-700 mb-4">
-                  Analysis job is being processed. Results will appear here once completed.
+                  {isGitHubAnalysis 
+                    ? `GitHub repository analysis is being processed: ${githubRepo}`
+                    : 'Analysis job is being processed. Results will appear here once completed.'}
                 </p>
                 <div className="flex justify-center gap-3">
                   <Button onClick={handleRefresh} variant="outline">
@@ -771,7 +850,7 @@ const Dashboard = () => {
                 <FileCode className="w-16 h-16 mx-auto text-muted-foreground" />
                 <h3 className="text-lg font-semibold">No Analysis Job Found</h3>
                 <p className="text-muted-foreground mb-4">
-                  Upload some files and start an analysis to see detailed results here.
+                  Upload some files or analyze a GitHub repository to see detailed results here.
                 </p>
                 <Button onClick={() => navigate('/')} variant="hero">
                   Start New Analysis

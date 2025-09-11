@@ -1,6 +1,5 @@
 /**
- * API Client for Code Quality Insight Backend
- * Updated to match the exact backend API structure
+ * Complete API Client for Code Quality Insight Backend with GitHub Integration
  */
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -17,6 +16,48 @@ export interface UploadResponse {
   files: UploadedFile[];
   upload_dir: string;
   total_files: number;
+}
+
+// GitHub-specific interfaces
+export interface GitHubAnalyzeRequest {
+  repo_url: string;
+  branch: string;
+  agents: string[];
+  detailed: boolean;
+}
+
+export interface GitHubValidationResponse {
+  valid: boolean;
+  owner?: string;
+  repo_name?: string;
+  full_name?: string;
+  description?: string;
+  language?: string;
+  size_kb?: number;
+  stars?: number;
+  forks?: number;
+  open_issues?: number;
+  default_branch?: string;
+  last_update?: string;
+  is_private?: boolean;
+  is_fork?: boolean;
+  branches?: string[];
+  error?: string;
+}
+
+export interface GitHubAnalysisResponse {
+  success: boolean;
+  job_id: string;
+  repo_url: string;
+  branch: string;
+  files_analyzed: number;
+  repo_stats: {
+    total_files: number;
+    total_lines: number;
+    total_size_bytes: number;
+    language_breakdown: Record<string, { files: number; lines: number }>;
+  };
+  temp_dir?: string; // IMPORTANT: Added for Q&A system
 }
 
 // Backend API Response Types (matching the actual backend structure)
@@ -72,6 +113,18 @@ export interface BackendResultsResponse {
   results: BackendAnalysisResult[];
   total_files: number;
   completion_time: string;
+  github_metadata?: {
+    repo_url?: string;
+    branch?: string;
+    stats?: {
+      total_files: number;
+      total_lines: number;
+      total_size_bytes: number;
+      language_breakdown: Record<string, { files: number; lines: number }>;
+    };
+    analysis_type?: string;
+    temp_dir?: string; // IMPORTANT: Added for Q&A system
+  };
 }
 
 // Frontend display types (transformed from backend data)
@@ -98,6 +151,13 @@ export interface AnalysisResult {
   files: FileResult[];
   analysis_time: number;
   timestamp: string;
+  github_metadata?: {
+    repo_url?: string;
+    branch?: string;
+    stats?: any;
+    analysis_type?: string;
+    temp_dir?: string; // IMPORTANT: For Q&A system
+  };
 }
 
 export interface FileResult {
@@ -148,7 +208,17 @@ export interface ChatSession {
   codebase_info: {
     path: string;
     status: string;
+    context?: string;
+    github_repo?: string;
+    branch?: string;
   };
+}
+
+// ENHANCED: Chat start request with GitHub support
+export interface ChatStartRequest {
+  upload_dir?: string;
+  github_repo?: string;
+  branch?: string;
 }
 
 class ApiClient {
@@ -206,6 +276,60 @@ class ApiClient {
   }
 
   /**
+   * Validate GitHub repository URL
+   */
+  async validateGitHubRepository(repoUrl: string): Promise<GitHubValidationResponse> {
+    const response = await fetch(`${this.baseURL}/api/github/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ repo_url: repoUrl }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'GitHub validation failed');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get repository branches
+   */
+  async getRepositoryBranches(owner: string, repo: string): Promise<{ success: boolean; branches: string[]; default_branch: string; error?: string }> {
+    const response = await fetch(`${this.baseURL}/api/github/branches/${owner}/${repo}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch branches');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Analyze GitHub repository
+   */
+  async analyzeGitHubRepository(request: GitHubAnalyzeRequest, jobId?: string): Promise<GitHubAnalysisResponse> {
+    const response = await fetch(`${this.baseURL}/api/github/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'GitHub analysis failed');
+    }
+
+    return response.json();
+  }
+
+  /**
    * Get analysis status
    */
   async getAnalysisStatus(jobId: string): Promise<AnalysisStatus> {
@@ -236,103 +360,96 @@ class ApiClient {
     return this.transformBackendResults(backendData);
   }
 
-  
-private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
-  const results = backendData.results;
-  
-  // Calculate totals
-  const totalFiles = results.length;
-  const totalIssues = results.reduce((sum, file) => sum + file.total_issues, 0);
-  
-  // FIXED: Separate critical from high issues
-  const totalCriticalIssues = results.reduce((sum, file) => {
-    // Count critical issues from detailed_issues
-    const criticalCount = file.detailed_issues.filter(issue => 
-      issue.severity.toLowerCase() === 'critical'
-    ).length;
-    return sum + criticalCount;
-  }, 0);
-  
-  const totalHighIssues = results.reduce((sum, file) => sum + file.high_issues, 0);
-  const totalMediumIssues = results.reduce((sum, file) => sum + file.medium_issues, 0);
-  const totalLowIssues = results.reduce((sum, file) => sum + file.low_issues, 0);
-  
-  // FIXED: Calculate agent breakdown with correct mapping
-  // const agentBreakdown: Record<string, number> = {};
-  // results.forEach(file => {
-  //   file.agent_performance.forEach(agent => {
-  //     const agentKey = agent.agent.toLowerCase();
-  //     if (!agentBreakdown[agentKey]) {
-  //       agentBreakdown[agentKey] = 0;
-  //     }
-  //     agentBreakdown[agentKey] += agent.issues;
-  //   });
-  // });
+  private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
+    const results = backendData.results;
+    
+    // Calculate totals
+    const totalFiles = results.length;
+    const totalIssues = results.reduce((sum, file) => sum + file.total_issues, 0);
+    
+    // Separate critical from high issues
+    const totalCriticalIssues = results.reduce((sum, file) => {
+      const criticalCount = file.detailed_issues.filter(issue => 
+        issue.severity.toLowerCase() === 'critical'
+      ).length;
+      return sum + criticalCount;
+    }, 0);
+    
+    const totalHighIssues = results.reduce((sum, file) => sum + file.high_issues, 0);
+    const totalMediumIssues = results.reduce((sum, file) => sum + file.medium_issues, 0);
+    const totalLowIssues = results.reduce((sum, file) => sum + file.low_issues, 0);
+    
+    const agentBreakdown = results.length > 0 ? results[0].agent_breakdown : {};
 
-  const agentBreakdown = results.length > 0 ? results[0].agent_breakdown : {};
+    // Transform file results
+    const files: FileResult[] = results.map(file => ({
+      file: file.file,
+      path: file.file,
+      language: file.language,
+      lines: file.lines,
+      issues_count: file.total_issues,
+      issues: file.detailed_issues.map(issue => ({
+        title: issue.title,
+        description: issue.description,
+        severity: issue.severity,
+        agent: issue.agent,
+        line: issue.line,
+        suggestion: issue.fix,
+        file: issue.file
+      }))
+    }));
 
-  // Transform file results
-  const files: FileResult[] = results.map(file => ({
-    file: file.file,
-    path: file.file,
-    language: file.language,
-    lines: file.lines,
-    issues_count: file.total_issues,
-    issues: file.detailed_issues.map(issue => ({
-      title: issue.title,
-      description: issue.description,
-      severity: issue.severity,
-      agent: issue.agent,
-      line: issue.line,
-      suggestion: issue.fix,
-      file: issue.file
-    }))
-  }));
+    // Calculate metrics
+    const securityIssues = agentBreakdown.security || 0;
+    const performanceIssues = agentBreakdown.performance || 0;
+    const complexityIssues = agentBreakdown.complexity || 0;
+    const documentationIssues = agentBreakdown.documentation || 0;
 
-  // Calculate metrics (simplified scoring based on issues)
-  const securityIssues = agentBreakdown.security || 0;
-  const performanceIssues = agentBreakdown.performance || 0;
-  const complexityIssues = agentBreakdown.complexity || 0;
-  const documentationIssues = agentBreakdown.documentation || 0;
-
-  return {
-    job_id: backendData.job_id,
-    summary: {
-      total_files: totalFiles,
-      total_issues: totalIssues,
-      severity_breakdown: {
-        critical: totalCriticalIssues,  // FIXED: Add critical separately
-        high: totalHighIssues,
-        medium: totalMediumIssues,
-        low: totalLowIssues,
+    return {
+      job_id: backendData.job_id,
+      summary: {
+        total_files: totalFiles,
+        total_issues: totalIssues,
+        severity_breakdown: {
+          critical: totalCriticalIssues,
+          high: totalHighIssues,
+          medium: totalMediumIssues,
+          low: totalLowIssues,
+        },
+        agent_breakdown: agentBreakdown,
+        overall_score: Math.max(0, 100 - (totalIssues * 2)),
       },
-      agent_breakdown: agentBreakdown,
-      overall_score: Math.max(0, 100 - (totalIssues * 2)), // Simple scoring
-    },
-    metrics: {
-      security_score: Math.max(0, 100 - (securityIssues * 5)),
-      performance_score: Math.max(0, 100 - (performanceIssues * 4)),
-      code_quality_score: Math.max(0, 100 - (complexityIssues * 3)),
-      documentation_score: Math.max(0, 100 - (documentationIssues * 2)),
-    },
-    files,
-    analysis_time: results.reduce((sum, file) => sum + file.processing_time, 0),
-    timestamp: backendData.completion_time,
-  };
-}
+      metrics: {
+        security_score: Math.max(0, 100 - (securityIssues * 5)),
+        performance_score: Math.max(0, 100 - (performanceIssues * 4)),
+        code_quality_score: Math.max(0, 100 - (complexityIssues * 3)),
+        documentation_score: Math.max(0, 100 - (documentationIssues * 2)),
+      },
+      files,
+      analysis_time: results.reduce((sum, file) => sum + file.processing_time, 0),
+      timestamp: backendData.completion_time,
+      github_metadata: backendData.github_metadata, // IMPORTANT: Preserve GitHub metadata including temp_dir
+    };
+  }
 
   /**
-   * Start chat session
+   * Start chat session - ENHANCED for GitHub support
    */
-  async startChatSession(uploadDir?: string): Promise<ChatSession> {
+  async startChatSession(request?: ChatStartRequest): Promise<ChatSession> {
+    console.log('[API] Starting chat session with request:', request);
+    
+    const body = request ? {
+      upload_dir: request.upload_dir || '',
+      github_repo: request.github_repo || '',
+      branch: request.branch || ''
+    } : { upload_dir: '' };
+
     const response = await fetch(`${this.baseURL}/api/chat/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        upload_dir: uploadDir || '',
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -404,6 +521,27 @@ private transformBackendResults(backendData: BackendResultsResponse): AnalysisRe
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Clean up GitHub temporary directory (optional cleanup)
+   */
+  async cleanupGitHubTempDir(jobId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await fetch(`${this.baseURL}/api/github/cleanup/${jobId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Cleanup failed');
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error('Cleanup failed:', error);
+      return { success: false, message: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }

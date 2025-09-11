@@ -12,13 +12,15 @@ import {
   ArrowRight,
   Star,
   Users,
-  Clock
+  Clock,
+  Github
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 
-const Landing = () => {
-  const navigate = useNavigate();
+interface LandingProps {
+  onAnalysisStart?: (jobId: string, metadata?: any) => void;
+}
 
+const Landing: React.FC<LandingProps> = ({ onAnalysisStart }) => {
   const features = [
     {
       icon: Shield,
@@ -49,6 +51,30 @@ const Landing = () => {
     { value: "<2min", label: "Average Analysis", icon: Clock }
   ];
 
+  const handleAnalysisStart = (jobId: string, metadata?: any) => {
+    console.log('[Landing] Analysis started:', jobId, metadata);
+    
+    if (onAnalysisStart) {
+      onAnalysisStart(jobId, metadata);
+    } else {
+      // Default behavior - navigate to dashboard
+      const params = new URLSearchParams({ job_id: jobId });
+      
+      if (metadata?.upload_dir) {
+        params.set('upload_dir', metadata.upload_dir);
+      }
+      
+      if (metadata?.source === 'github') {
+        params.set('github_repo', encodeURIComponent(metadata.full_name || ''));
+        params.set('branch', metadata.branch || 'main');
+      }
+      
+      // In a real app, you'd use navigate here
+      console.log('[Landing] Would navigate to:', `/dashboard?${params.toString()}`);
+      alert(`Analysis started! Job ID: ${jobId}\nWould navigate to dashboard...`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-background">
       {/* Header */}
@@ -60,11 +86,7 @@ const Landing = () => {
             </div>
             <span className="text-xl font-bold text-gradient">Atlan Code Intelligence</span>
           </div>
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/dashboard')}
-            className="hidden sm:flex"
-          >
+          <Button variant="outline" className="hidden sm:flex">
             Go to Dashboard
             <ArrowRight className="w-4 h-4" />
           </Button>
@@ -77,7 +99,7 @@ const Landing = () => {
         <div className="max-w-7xl mx-auto px-6 text-center relative">
           <div className="inline-flex items-center px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8 animate-fade-in">
             <Star className="w-4 h-4 mr-2" />
-            Now with AI-powered insights
+            Now with GitHub integration & AI-powered insights
           </div>
           
           <h1 className="text-5xl sm:text-6xl font-bold mb-6 leading-tight">
@@ -87,28 +109,59 @@ const Landing = () => {
           
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-12 leading-relaxed">
             Transform your development workflow with advanced code analysis, security scanning, 
-            and performance insights powered by artificial intelligence.
+            and performance insights. Analyze local files or GitHub repositories with AI-powered intelligence.
           </p>
 
-          {/* File Upload Section */}
+          {/* File Upload Section with GitHub Integration */}
           <div className="max-w-2xl mx-auto mb-16">
-            <FileUpload />
+            <FileUpload onAnalysisStart={handleAnalysisStart} />
           </div>
 
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            {/* <Button 
-              variant="hero" 
-              size="lg"
-              onClick={() => navigate('/dashboard')}
-              className="min-w-[200px]"
-            >
-              Start Analyzing
-              <ArrowRight className="w-5 h-5" />
-            </Button> */}
             <Button variant="outline" size="lg" className="min-w-[200px]">
               View Sample Report
             </Button>
+            <Button variant="ghost" size="lg" className="min-w-[200px] flex items-center gap-2">
+              <Github className="w-5 h-5" />
+              Browse Public Repos
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* GitHub Integration Highlight */}
+      <section className="py-16 bg-gradient-to-r from-gray-900 to-black text-white">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-full mb-6">
+            <Github className="w-8 h-8 text-black" />
+          </div>
+          
+          <h2 className="text-3xl font-bold mb-4">
+            Seamless GitHub Integration
+          </h2>
+          
+          <p className="text-xl text-gray-300 max-w-2xl mx-auto mb-8">
+            Analyze any GitHub repository instantly. Support for all branches, 
+            automatic file detection, and comprehensive multi-agent analysis.
+          </p>
+          
+          <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+            <div className="p-6 rounded-lg bg-white/10 backdrop-blur-sm">
+              <Code className="w-8 h-8 text-blue-400 mx-auto mb-3" />
+              <h3 className="font-semibold mb-2">Smart Detection</h3>
+              <p className="text-sm text-gray-300">Automatically identifies and analyzes code files across all supported languages</p>
+            </div>
+            <div className="p-6 rounded-lg bg-white/10 backdrop-blur-sm">
+              <Shield className="w-8 h-8 text-green-400 mx-auto mb-3" />
+              <h3 className="font-semibold mb-2">Security First</h3>
+              <p className="text-sm text-gray-300">Comprehensive security scanning with vulnerability detection and remediation tips</p>
+            </div>
+            <div className="p-6 rounded-lg bg-white/10 backdrop-blur-sm">
+              <BarChart3 className="w-8 h-8 text-purple-400 mx-auto mb-3" />
+              <h3 className="font-semibold mb-2">Quality Metrics</h3>
+              <p className="text-sm text-gray-300">Detailed quality assessment with performance and complexity analysis</p>
+            </div>
           </div>
         </div>
       </section>
@@ -179,12 +232,7 @@ const Landing = () => {
           <p className="text-xl text-muted-foreground mb-8">
             Join thousands of developers who trust Atlan Code Intelligence
           </p>
-          <Button 
-            variant="hero" 
-            size="xl"
-            onClick={() => navigate('/dashboard')}
-            className="animate-glow"
-          >
+          <Button variant="hero" size="xl" className="animate-glow">
             Get Started for Free
             <ArrowRight className="w-5 h-5" />
           </Button>

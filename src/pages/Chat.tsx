@@ -16,7 +16,10 @@ import {
   Zap,
   FileSearch,
   Copy,
-  RefreshCw
+  RefreshCw,
+  Github,
+  GitBranch,
+  FolderOpen
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'react-router-dom';
@@ -184,7 +187,6 @@ const processMarkdownContent = (text: string) => {
 };
 
 // Process inline formatting (bold, italic, etc.)
-// Process inline formatting (bold, italic, etc.)
 const processInlineFormatting = (text: string) => {
   // Handle bold text **text**
   let processed = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900 dark:text-gray-100">$1</strong>');
@@ -333,43 +335,27 @@ const MessageComponent: React.FC<MessageProps> = ({ message, isTyping = false, o
 };
 
 const Chat = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      content: `# Welcome to AI Code Assistant!
-
-I'm here to help you analyze your codebase and answer questions about your **LangGraph analysis results**. I can assist with:
-
-## What I can help you with:
-
-- **Security Analysis**: Find vulnerabilities and security issues
-- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
-- **Code Quality**: Review complexity, maintainability, and best practices
-- **Documentation**: Check for missing docs and unclear code
-
-## Getting Started:
-
-Ask me anything about your uploaded code! I have context about your files and can provide specific, actionable insights.
-
-**Example questions:**
-- "What security issues did you find?"
-- "How can I improve performance?"
-- "Which files need the most attention?"`,
-      role: 'assistant',
-      timestamp: new Date()
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [isInitializing, setIsInitializing] = useState(true);
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+  const [codebaseContext, setCodebaseContext] = useState<{
+    type: 'upload' | 'github' | 'unknown';
+    path?: string;
+    repo?: string;
+    branch?: string;
+    context?: string;
+  }>({ type: 'unknown' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   
-  // Get upload directory from URL params
+  // Get context from URL params
   const uploadDir = searchParams.get('upload_dir');
+  const githubRepo = searchParams.get('github_repo');
+  const branch = searchParams.get('branch');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -379,46 +365,56 @@ Ask me anything about your uploaded code! I have context about your files and ca
     scrollToBottom();
   }, [messages]);
 
-  // Initialize chat session
+  // Initialize chat session with proper context detection - FIXED
   useEffect(() => {
     const initializeChat = async () => {
       try {
-        console.log('[Chat] Initializing chat session with uploadDir:', uploadDir);
+        console.log('[Chat] Initializing chat session...');
+        console.log('[Chat] URL params:', { uploadDir, githubRepo, branch });
         setIsInitializing(true);
         
-        const result = await apiClient.startChatSession(uploadDir || undefined);
-        console.log('[Chat] Chat session started:', result);
+        // Build request with proper context - ENHANCED
+        const request: any = {};
+        
+        if (uploadDir) {
+          request.upload_dir = uploadDir;
+          setCodebaseContext({ 
+            type: 'upload', 
+            path: uploadDir,
+            context: `uploaded files in ${uploadDir}`
+          });
+          console.log('[Chat] Setting up for file upload context:', uploadDir);
+        } else if (githubRepo) {
+          // IMPORTANT: Decode URL-encoded repo name for proper handling
+          const decodedRepo = decodeURIComponent(githubRepo);
+          request.github_repo = decodedRepo;  // Send decoded repo name
+          request.branch = branch || 'main';
+          setCodebaseContext({ 
+            type: 'github', 
+            repo: decodedRepo,  // Store decoded repo name
+            branch: branch || 'main',
+            context: `GitHub repository ${decodedRepo} (${branch || 'main'})`
+          });
+          console.log('[Chat] Setting up for GitHub context:', decodedRepo, branch);
+          console.log('[Chat] Original encoded repo:', githubRepo);
+        } else {
+          console.log('[Chat] No specific context provided, using default');
+        }
+        
+        console.log('[Chat] Starting chat session with request:', request);
+        
+        const result = await apiClient.startChatSession(request);
+        console.log('[Chat] Chat session started successfully:', result);
         
         setSessionId(result.session_id);
         
-        // Update welcome message with codebase info if available
-        if (result.codebase_info?.path && result.codebase_info.path !== '.') {
-          setMessages([{
-            id: 'welcome',
-            content: `# AI Code Assistant Connected!
-
-I've successfully connected to your uploaded codebase and I'm ready to help you analyze your code.
-
-## Your Codebase:
-- **Location**: \`${result.codebase_info.path}\`
-- **Status**: ${result.codebase_info.status}
-
-## What I can help you with:
-
-- **Security Analysis**: Find vulnerabilities and security issues
-- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
-- **Code Quality**: Review complexity, maintainability, and best practices
-- **Documentation**: Check for missing docs and unclear code
-
-Ask me anything about your code! I have full context and can provide specific, actionable insights.`,
-            role: 'assistant',
-            timestamp: new Date()
-          }]);
-        }
+        // Create context-aware welcome message
+        const welcomeMessage = createWelcomeMessage(result);
+        setMessages([welcomeMessage]);
         
         toast({
           title: "Chat Ready!",
-          description: "Connected to your code analysis backend.",
+          description: `Connected to ${result.codebase_info?.context || 'your codebase'}`,
         });
         
       } catch (error) {
@@ -431,13 +427,108 @@ Ask me anything about your code! I have full context and can provide specific, a
         
         // Set a mock session ID for demo mode
         setSessionId('demo-session');
+        
+        // Create fallback welcome message
+        const fallbackMessage = createFallbackWelcomeMessage();
+        setMessages([fallbackMessage]);
       } finally {
         setIsInitializing(false);
       }
     };
 
     initializeChat();
-  }, [uploadDir, toast]);
+  }, [uploadDir, githubRepo, branch, toast]);
+
+  // Create context-aware welcome message - ENHANCED
+  const createWelcomeMessage = (result: any): Message => {
+    const codebaseInfo = result.codebase_info;
+    let welcomeContent = '';
+
+    if (codebaseInfo?.github_repo) {
+      // GitHub repository context
+      welcomeContent = `# AI Code Assistant Connected!
+
+I've successfully connected to your **GitHub repository** and I'm ready to help you analyze your code.
+
+## Your GitHub Repository:
+- **Repository**: \`${codebaseInfo.github_repo}\`
+- **Branch**: \`${codebaseInfo.branch || 'main'}\`
+- **Status**: ${codebaseInfo.status}
+- **Context**: ${codebaseInfo.context}
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues in your repository
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+Ask me anything about your GitHub repository! I have full context and can provide specific, actionable insights.`;
+    } else if (codebaseInfo?.path && codebaseInfo.path !== '.') {
+      // File upload context
+      welcomeContent = `# AI Code Assistant Connected!
+
+I've successfully connected to your uploaded codebase and I'm ready to help you analyze your code.
+
+## Your Codebase:
+- **Location**: \`${codebaseInfo.path}\`
+- **Status**: ${codebaseInfo.status}
+- **Context**: ${codebaseInfo.context}
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+Ask me anything about your uploaded code! I have full context and can provide specific, actionable insights.`;
+    } else {
+      // Default context
+      welcomeContent = `# AI Code Assistant Ready!
+
+I'm connected to your codebase and ready to help you analyze your code.
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+Ask me anything about your code! I have context and can provide specific, actionable insights.`;
+    }
+
+    return {
+      id: 'welcome',
+      content: welcomeContent,
+      role: 'assistant',
+      timestamp: new Date()
+    };
+  };
+
+  // Create fallback welcome message for demo mode
+  const createFallbackWelcomeMessage = (): Message => {
+    return {
+      id: 'welcome',
+      content: `# AI Code Assistant (Demo Mode)
+
+I'm here to help you analyze your codebase, but I'm currently running in demo mode due to a connection issue.
+
+## What I can help you with:
+
+- **Security Analysis**: Find vulnerabilities and security issues
+- **Performance Optimization**: Identify bottlenecks and improvement opportunities  
+- **Code Quality**: Review complexity, maintainability, and best practices
+- **Documentation**: Check for missing docs and unclear code
+
+Ask me anything about your code! I'll provide helpful responses using demo data.
+
+**Note**: To access your actual codebase, please refresh the page and try again.`,
+      role: 'assistant',
+      timestamp: new Date()
+    };
+  };
 
   const quickQuestions = [
     {
@@ -466,10 +557,17 @@ Ask me anything about your code! I have full context and can provide specific, a
   const getEnhancedResponse = (userMessage: string): string => {
     const message = userMessage.toLowerCase();
     
+    // Add context information to responses
+    const contextInfo = codebaseContext.type === 'github' 
+      ? `GitHub repository **${codebaseContext.repo}** (branch: ${codebaseContext.branch})`
+      : codebaseContext.type === 'upload'
+      ? `uploaded codebase from \`${codebaseContext.path}\``
+      : 'your codebase';
+    
     if (message.includes('security') || message.includes('vulnerabilit')) {
       return `## Security Analysis Results
 
-Based on the **LangGraph multi-agent analysis**, here are the key security findings:
+Based on the **LangGraph multi-agent analysis** of ${contextInfo}, here are the key security findings:
 
 ### Critical/High Issues Found:
 
@@ -509,7 +607,7 @@ Based on the **LangGraph multi-agent analysis**, here are the key security findi
     if (message.includes('performance') || message.includes('optimize')) {
       return `## Performance Analysis Complete
 
-The **LangGraph Performance Agent** identified several optimization opportunities:
+The **LangGraph Performance Agent** identified several optimization opportunities in ${contextInfo}:
 
 ### High Impact Improvements:
 
@@ -551,7 +649,7 @@ result = ", ".join(str(item) for item in items)
     if (message.includes('quality') || message.includes('review') || message.includes('complexity')) {
       return `## Code Quality Assessment
 
-**LangGraph Multi-Agent Analysis Results**:
+**LangGraph Multi-Agent Analysis Results** for ${contextInfo}:
 
 ### Overall Analysis:
 - **Files Analyzed**: Multiple code files processed
@@ -591,7 +689,7 @@ result = ", ".join(str(item) for item in items)
     // Default comprehensive response
     return `## AI Code Assistant Ready!
 
-I'm here to help you with your **LangGraph multi-agent analysis results**. Based on your uploaded files, I can provide insights from multiple specialized agents:
+I'm here to help you with your **LangGraph multi-agent analysis results** for ${contextInfo}. Based on your files, I can provide insights from multiple specialized agents:
 
 ### Available Analysis Agents:
 
@@ -734,144 +832,175 @@ I'm still here to help using demo responses while we resolve this issue!`,
     setTypingMessageId(null);
   };
 
-// Replace the main component structure in your Chat.tsx with this:
+  // Context indicator component
+  const ContextIndicator = () => {
+    if (codebaseContext.type === 'unknown') return null;
 
-return (
-  <div className="h-screen bg-gray-50 dark:bg-gray-900 flex">
-    <Sidebar />
-    
-    <main className="flex-1 flex flex-col bg-white dark:bg-gray-900">
-      {/* Enhanced Header - Fixed Height */}
-      <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent flex items-center gap-2">
-              <MessageSquare className="w-6 h-6 text-blue-600" />
-              AI Code Assistant
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Ask questions about your LangGraph analysis results
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setMessages([messages[0]]);
-              setInputValue('');
-              setTypingMessageId(null);
-            }}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            New Chat
-          </Button>
-        </div>
+    return (
+      <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        {codebaseContext.type === 'github' ? (
+          <>
+            <Github className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Connected to: {codebaseContext.repo} ({codebaseContext.branch})
+            </span>
+          </>
+        ) : (
+          <>
+            <FolderOpen className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Connected to: Uploaded files
+            </span>
+          </>
+        )}
       </div>
+    );
+  };
 
-      {/* Messages Container - Scrollable with Fixed Height */}
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
-          <div className="max-w-4xl mx-auto space-y-6">
-            {messages.map((message) => (
-              <MessageComponent
-                key={message.id}
-                message={message}
-                isTyping={typingMessageId === message.id}
-                onTypingComplete={handleTypingComplete}
-              />
-            ))}
-            
-            {/* Enhanced Loading State */}
-            {isLoading && (
-              <div className="flex gap-4 justify-start">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
-                  <Bot className="w-5 h-5 text-white" />
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-2xl px-6 py-4 border border-gray-200 dark:border-gray-700 shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      AI is analyzing your question...
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Questions - Conditionally Rendered, Fixed Height */}
-      {messages.length === 1 && (
-        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <div className="max-w-4xl mx-auto">
-            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-              <Lightbulb className="w-4 h-4 text-blue-500" />
-              Quick Questions
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {quickQuestions.map((question, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  className="justify-start h-auto p-4 text-left hover:shadow-md transition-all"
-                  onClick={() => handleSendMessage(question.text)}
-                  disabled={isLoading}
-                >
-                  <div className={`p-2 rounded-lg ${question.color} mr-3 border`}>
-                    <question.icon className="w-4 h-4" />
-                  </div>
-                  <span className="text-sm">{question.text}</span>
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Enhanced Input Section - Fixed Height */}
-      <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <Input
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Ask me anything about your LangGraph analysis results..."
-                disabled={isLoading || isInitializing}
-                className="min-h-[3rem] pr-12 border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-900"
-              />
+  return (
+    <div className="h-screen bg-gray-50 dark:bg-gray-900 flex">
+      <Sidebar />
+      
+      <main className="flex-1 flex flex-col bg-white dark:bg-gray-900">
+        {/* Enhanced Header - Fixed Height */}
+        <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent flex items-center gap-2">
+                <MessageSquare className="w-6 h-6 text-blue-600" />
+                AI Code Assistant
+              </h1>
+              <p className="text-gray-600 dark:text-gray-400">
+                Ask questions about your LangGraph analysis results
+                {codebaseContext.type !== 'unknown' && (
+                  <span className="ml-2">
+                    • {codebaseContext.type === 'github' ? 'GitHub Repository' : 'Uploaded Files'}
+                  </span>
+                )}
+              </p>
             </div>
             <Button
-              onClick={() => handleSendMessage()}
-              disabled={!inputValue.trim() || isLoading || isInitializing}
-              className="px-6 bg-blue-500 hover:bg-blue-600 text-white"
-              size="lg"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setMessages([messages[0]]);
+                setInputValue('');
+                setTypingMessageId(null);
+              }}
+              className="flex items-center gap-2"
             >
-              {isLoading || isInitializing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
+              <RefreshCw className="w-4 h-4" />
+              New Chat
             </Button>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-            Press Enter to send • Shift+Enter for new line 
-            {sessionId === 'demo-session' ? ' • Demo Mode Active' : ''}
-          </p>
         </div>
-      </div>
-    </main>
-  </div>
-);
+
+        {/* Context Indicator */}
+        <ContextIndicator />
+
+        {/* Messages Container - Scrollable with Fixed Height */}
+        <div className="flex-1 overflow-hidden">
+          <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
+            <div className="max-w-4xl mx-auto space-y-6">
+              {messages.map((message) => (
+                <MessageComponent
+                  key={message.id}
+                  message={message}
+                  isTyping={typingMessageId === message.id}
+                  onTypingComplete={handleTypingComplete}
+                />
+              ))}
+              
+              {/* Enhanced Loading State */}
+              {isLoading && (
+                <div className="flex gap-4 justify-start">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
+                    <Bot className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl px-6 py-4 border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        AI is analyzing your question...
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Questions - Conditionally Rendered, Fixed Height */}
+        {messages.length === 1 && (
+          <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <div className="max-w-4xl mx-auto">
+              <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+                <Lightbulb className="w-4 h-4 text-blue-500" />
+                Quick Questions
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {quickQuestions.map((question, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    className="justify-start h-auto p-4 text-left hover:shadow-md transition-all"
+                    onClick={() => handleSendMessage(question.text)}
+                    disabled={isLoading}
+                  >
+                    <div className={`p-2 rounded-lg ${question.color} mr-3 border`}>
+                      <question.icon className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm">{question.text}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Enhanced Input Section - Fixed Height */}
+        <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-6 bg-white dark:bg-gray-800">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <Input
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Ask me anything about your LangGraph analysis results..."
+                  disabled={isLoading || isInitializing}
+                  className="min-h-[3rem] pr-12 border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-900"
+                />
+              </div>
+              <Button
+                onClick={() => handleSendMessage()}
+                disabled={!inputValue.trim() || isLoading || isInitializing}
+                className="px-6 bg-blue-500 hover:bg-blue-600 text-white"
+                size="lg"
+              >
+                {isLoading || isInitializing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+              Press Enter to send • Shift+Enter for new line 
+              {sessionId === 'demo-session' ? ' • Demo Mode Active' : ''}
+            </p>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
 };
 
 export default Chat;
