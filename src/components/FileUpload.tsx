@@ -221,26 +221,30 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
     }
   };
 
-  const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
-    console.log('[FileUpload] GitHub analysis started:', jobId, repoInfo);
-    
-    // Navigate to dashboard for GitHub analysis
-    const params = new URLSearchParams({
-      job_id: jobId,
-      github_repo: encodeURIComponent(repoInfo.full_name || ''),
-      branch: repoInfo.branch || 'main'
+const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
+  console.log('[FileUpload] GitHub analysis started:', jobId, repoInfo);
+  
+  // FIXED: Navigate using upload_dir for both flows
+  const params = new URLSearchParams({
+    job_id: jobId,
+    upload_dir: repoInfo.upload_dir || '',  // CRITICAL: Pass upload_dir
+    // Keep GitHub metadata for display purposes
+    github_repo: encodeURIComponent(repoInfo.full_name || repoInfo.repo_url || ''),
+    branch: repoInfo.branch || 'main'
+  });
+  
+  console.log('[FileUpload] Navigating with params:', params.toString());
+  
+  navigate(`/dashboard?${params.toString()}`);
+  
+  // Call parent callback if provided
+  if (onAnalysisStart) {
+    onAnalysisStart(jobId, {
+      ...repoInfo,
+      source: 'github'
     });
-    
-    navigate(`/dashboard?${params.toString()}`);
-    
-    // Call parent callback if provided
-    if (onAnalysisStart) {
-      onAnalysisStart(jobId, {
-        ...repoInfo,
-        source: 'github'
-      });
-    }
-  };
+  }
+};
 
   const removeFile = (fileId: string) => {
     setFiles(prev => prev.filter(file => file.id !== fileId));

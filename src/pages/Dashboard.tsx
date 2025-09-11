@@ -259,24 +259,26 @@ const Dashboard = () => {
       .slice(0, 10) : [];
 
   // Event handlers - FIXED to properly handle GitHub context
-  const handleStartChat = () => {
-    console.log('[Dashboard] Starting chat with context:', { isGitHubAnalysis, githubRepo, branch, uploadDir });
-    
-    const params = new URLSearchParams();
-    
-    if (isGitHubAnalysis && githubRepo) {
-      // For GitHub analysis, pass the repo info
-      params.set('github_repo', githubRepo);
-      params.set('branch', branch || 'main');
-      console.log('[Dashboard] Starting chat for GitHub repo:', githubRepo, branch);
-    } else if (uploadDir) {
-      // For file uploads, pass the upload directory
-      params.set('upload_dir', uploadDir);
-      console.log('[Dashboard] Starting chat for upload dir:', uploadDir);
-    }
-    
-    navigate(`/chat/new?${params.toString()}`);
-  };
+const handleStartChat = () => {
+  console.log('[Dashboard] Starting chat with context:', { isGitHubAnalysis, githubRepo, branch, uploadDir });
+  
+  const params = new URLSearchParams();
+  
+  // ALWAYS pass upload_dir (works for both file upload and GitHub)
+  if (uploadDir) {
+    params.set('upload_dir', uploadDir);
+  }
+  
+  // Add GitHub context for display purposes
+  if (isGitHubAnalysis && githubRepo) {
+    params.set('github_repo', githubRepo);
+    params.set('branch', branch || 'main');
+  }
+  
+  console.log('[Dashboard] Chat params:', params.toString());
+  
+  navigate(`/chat/new?${params.toString()}`);
+};
 
   const handleRefresh = async () => {
     if (!jobId) return;

@@ -76,55 +76,57 @@ export const GitHubUpload: React.FC<GitHubUploadProps> = ({ onAnalysisStart }) =
     }
   };
 
-  const handleAnalyzeRepo = async () => {
-    if (!repoInfo?.valid) {
-      toast({
-        title: "Repository Not Validated",
-        description: "Please validate the repository first",
-        variant: "destructive"
-      });
-      return;
-    }
+const handleAnalyzeRepo = async () => {
+  if (!repoInfo?.valid) {
+    toast({
+      title: "Repository Not Validated",
+      description: "Please validate the repository first",
+      variant: "destructive"
+    });
+    return;
+  }
 
-    setIsAnalyzing(true);
-    try {
-      console.log('[GitHub] Starting analysis for:', repoUrl, 'branch:', selectedBranch);
-      
-      const result = await apiClient.analyzeGitHubRepository({
-        repo_url: repoUrl,
+  setIsAnalyzing(true);
+  try {
+    console.log('[GitHub] Starting analysis for:', repoUrl, 'branch:', selectedBranch);
+    
+    const result = await apiClient.analyzeGitHubRepository({
+      repo_url: repoUrl,
+      branch: selectedBranch,
+      agents: ['security', 'performance', 'complexity', 'documentation'],
+      detailed: true
+    });
+    
+    console.log('[GitHub] Analysis started:', result);
+    
+    toast({
+      title: "Analysis Started",
+      description: `Analyzing ${result.files_analyzed} files from ${repoInfo.full_name}`,
+    });
+
+    // FIXED: Call parent callback with upload_dir from result
+    if (onAnalysisStart) {
+      onAnalysisStart(result.job_id, {
+        full_name: repoInfo.full_name,
         branch: selectedBranch,
-        agents: ['security', 'performance', 'complexity', 'documentation'],
-        detailed: true
+        repo_url: repoUrl,
+        upload_dir: result.upload_dir,  // CRITICAL: Pass the temp directory as upload_dir
+        source: 'github',
+        ...result
       });
-      
-      console.log('[GitHub] Analysis started:', result);
-      
-      toast({
-        title: "Analysis Started",
-        description: `Analyzing ${result.files_analyzed} files from ${repoInfo.full_name}`,
-      });
-
-      // Call parent callback with proper repo info
-      if (onAnalysisStart) {
-        onAnalysisStart(result.job_id, {
-          full_name: repoInfo.full_name,
-          branch: selectedBranch,
-          repo_url: repoUrl,
-          ...result
-        });
-      }
-      
-    } catch (error) {
-      console.error('GitHub analysis error:', error);
-      toast({
-        title: "Analysis Failed",
-        description: error instanceof Error ? error.message : "Unable to start analysis",
-        variant: "destructive"
-      });
-    } finally {
-      setIsAnalyzing(false);
     }
-  };
+    
+  } catch (error) {
+    console.error('GitHub analysis error:', error);
+    toast({
+      title: "Analysis Failed",
+      description: error instanceof Error ? error.message : "Unable to start analysis",
+      variant: "destructive"
+    });
+  } finally {
+    setIsAnalyzing(false);
+  }
+};
 
   const formatFileSize = (sizeKb: number) => {
     if (sizeKb < 1024) return `${sizeKb} KB`;

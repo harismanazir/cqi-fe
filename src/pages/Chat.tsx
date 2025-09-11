@@ -362,82 +362,61 @@ const Chat = () => {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Initialize chat session with proper context detection - FIXED
-  useEffect(() => {
-    const initializeChat = async () => {
-      try {
-        console.log('[Chat] Initializing chat session...');
-        console.log('[Chat] URL params:', { uploadDir, githubRepo, branch });
-        setIsInitializing(true);
-        
-        // Build request with proper context - ENHANCED
-        const request: any = {};
-        
-        if (uploadDir) {
-          request.upload_dir = uploadDir;
-          setCodebaseContext({ 
-            type: 'upload', 
-            path: uploadDir,
-            context: `uploaded files in ${uploadDir}`
-          });
-          console.log('[Chat] Setting up for file upload context:', uploadDir);
-        } else if (githubRepo) {
-          // IMPORTANT: Decode URL-encoded repo name for proper handling
-          const decodedRepo = decodeURIComponent(githubRepo);
-          request.github_repo = decodedRepo;  // Send decoded repo name
-          request.branch = branch || 'main';
-          setCodebaseContext({ 
-            type: 'github', 
-            repo: decodedRepo,  // Store decoded repo name
-            branch: branch || 'main',
-            context: `GitHub repository ${decodedRepo} (${branch || 'main'})`
-          });
-          console.log('[Chat] Setting up for GitHub context:', decodedRepo, branch);
-          console.log('[Chat] Original encoded repo:', githubRepo);
-        } else {
-          console.log('[Chat] No specific context provided, using default');
-        }
-        
-        console.log('[Chat] Starting chat session with request:', request);
-        
-        const result = await apiClient.startChatSession(request);
-        console.log('[Chat] Chat session started successfully:', result);
-        
-        setSessionId(result.session_id);
-        
-        // Create context-aware welcome message
-        const welcomeMessage = createWelcomeMessage(result);
-        setMessages([welcomeMessage]);
-        
-        toast({
-          title: "Chat Ready!",
-          description: `Connected to ${result.codebase_info?.context || 'your codebase'}`,
+  const initializeChat = async () => {
+    try {
+      console.log('[Chat] Initializing chat session...');
+      console.log('[Chat] URL params:', { uploadDir, githubRepo, branch });
+      setIsInitializing(true);
+      
+      // UNIFIED REQUEST: Both flows use upload_dir
+      const request: any = {
+        upload_dir: uploadDir || '',
+        github_repo: githubRepo || '',  // For context only
+        branch: branch || ''           // For context only
+      };
+      
+      console.log('[Chat] Starting chat session with request:', request);
+      
+      const result = await apiClient.startChatSession(request);
+      console.log('[Chat] Chat session started successfully:', result);
+      
+      setSessionId(result.session_id);
+      
+      // Update context state
+      if (githubRepo) {
+        setCodebaseContext({ 
+          type: 'github', 
+          repo: decodeURIComponent(githubRepo),
+          branch: branch || 'main',
+          context: result.codebase_info?.context
         });
-        
-      } catch (error) {
-        console.error('Failed to initialize chat:', error);
-        toast({
-          title: "Connection Error",
-          description: "Failed to connect to chat backend. Using demo mode.",
-          variant: "destructive"
+      } else {
+        setCodebaseContext({ 
+          type: 'upload', 
+          path: uploadDir,
+          context: result.codebase_info?.context
         });
-        
-        // Set a mock session ID for demo mode
-        setSessionId('demo-session');
-        
-        // Create fallback welcome message
-        const fallbackMessage = createFallbackWelcomeMessage();
-        setMessages([fallbackMessage]);
-      } finally {
-        setIsInitializing(false);
       }
-    };
+      
+      // Create context-aware welcome message
+      const welcomeMessage = createWelcomeMessage(result);
+      setMessages([welcomeMessage]);
+      
+      toast({
+        title: "Chat Ready!",
+        description: `Connected to ${result.codebase_info?.context || 'your codebase'}`,
+      });
+      
+    } catch (error) {
+      console.error('Failed to initialize chat:', error);
+      // ... error handling
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
-    initializeChat();
-  }, [uploadDir, githubRepo, branch, toast]);
+  initializeChat();
+}, [uploadDir, githubRepo, branch, toast]);
 
   // Create context-aware welcome message - ENHANCED
   const createWelcomeMessage = (result: any): Message => {
