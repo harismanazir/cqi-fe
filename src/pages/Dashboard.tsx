@@ -236,7 +236,14 @@ const Dashboard = () => {
     { name: 'High', value: analysisResults.summary.severity_breakdown.high, color: '#EF4444' },
     { name: 'Medium', value: analysisResults.summary.severity_breakdown.medium, color: '#F59E0B' },
     { name: 'Low', value: analysisResults.summary.severity_breakdown.low, color: '#10B981' },
-  ].filter(item => item.value > 0) : [];
+  ] : [];
+
+// Check if there are any issues at all
+const hasAnyIssues = severityData.some(item => item.value > 0);
+
+// Filter for chart display (only items with values > 0)
+const chartSeverityData = severityData.filter(item => item.value > 0);
+
 
   const agentData = analysisResults ? 
     Object.entries(analysisResults.summary.agent_breakdown).map(([agent, count]) => ({
@@ -632,8 +639,7 @@ const handleStartChat = () => {
 
               {/* Charts Section */}
               <div className="grid lg:grid-cols-3 gap-6 mb-8">
-                {/* Issue Severity Distribution */}
-                {severityData.length > 0 && (
+                {/* Issue Severity Distribution - Always show */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
@@ -642,26 +648,47 @@ const handleStartChat = () => {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <PieChart>
-                          <Pie
-                            data={severityData}
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={80}
-                            dataKey="value"
-                            label={({ name, value }) => `${name}: ${value}`}
-                          >
-                            {severityData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
+                      {hasAnyIssues ? (
+                        <ResponsiveContainer width="100%" height={250}>
+                          <PieChart>
+                            <Pie
+                              data={chartSeverityData}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={80}
+                              dataKey="value"
+                              label={({ name, value }) => `${name}: ${value}`}
+                            >
+                              {chartSeverityData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-[250px] flex flex-col items-center justify-center text-center">
+                          <CheckCircle className="w-16 h-16 text-green-500 mb-4" />
+                          <h3 className="text-lg font-semibold text-green-700 mb-2">No Issues Found!</h3>
+                          <p className="text-sm text-green-600">
+                            Your code analysis completed successfully with no issues detected.
+                          </p>
+                          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                            {severityData.map((item) => (
+                              <div key={item.name} className="flex items-center gap-2">
+                                <div 
+                                  className="w-3 h-3 rounded-full" 
+                                  style={{ backgroundColor: item.color }}
+                                ></div>
+                                <span className="text-green-600">{item.name}: 0</span>
+                              </div>
                             ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
-                )}
+                
 
                 {/* Language Distribution */}
                 {languageData.length > 0 && (

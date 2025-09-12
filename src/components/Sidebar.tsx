@@ -23,10 +23,10 @@ export const Sidebar: React.FC = () => {
   const navigationItems = [
     { icon: Home, label: 'Dashboard', path: '/dashboard' },
     { icon: Upload, label: 'Upload', path: '/' },
-    { icon: BarChart3, label: 'Analytics', path: '/analytics' },
-    { icon: FileSearch, label: 'Code Search', path: '/search' },
-    { icon: MessageSquare, label: 'AI Chat', path: '/chat/new' },
-    { icon: History, label: 'History', path: '/history' },
+    // { icon: BarChart3, label: 'Analytics', path: '/analytics' },
+    // { icon: FileSearch, label: 'Code Search', path: '/search' },
+    // { icon: MessageSquare, label: 'AI Chat', path: '/chat/new' },
+    // { icon: History, label: 'History', path: '/history' },
   ];
 
   const recentScans = [

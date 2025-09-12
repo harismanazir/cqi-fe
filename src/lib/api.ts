@@ -2,7 +2,7 @@
  * Complete API Client for Code Quality Insight Backend with GitHub Integration
  */
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://lobster-app-nqbfx.ondigitalocean.app';
 
 export interface UploadedFile {
   name: string;
