@@ -86,10 +86,10 @@ const Landing: React.FC<LandingProps> = ({ onAnalysisStart }) => {
             </div>
             <span className="text-xl font-bold text-gradient">Atlan Code Intelligence</span>
           </div>
-          <Button variant="outline" className="hidden sm:flex">
+          {/* <Button variant="outline" className="hidden sm:flex">
             Go to Dashboard
             <ArrowRight className="w-4 h-4" />
-          </Button>
+          </Button> */}
         </div>
       </header>
 

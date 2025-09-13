@@ -466,17 +466,15 @@ const Dashboard = () => {
               <span className="text-sm text-muted-foreground">
                 {Math.round(analysisProgress)}% • {completedFiles}/{totalFiles} files
               </span>
-              {showPartialResults && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPartialResults(!showPartialResults)}
-                  className="flex items-center gap-2"
-                >
-                  <Eye className="w-4 h-4" />
-                  {showPartialResults ? 'Hide' : 'Show'} Live Results
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPartialResults(!showPartialResults)}
+                className="flex items-center gap-2"
+              >
+                <Eye className="w-4 h-4" />
+                {showPartialResults ? 'Hide' : 'Show'} Live Results
+              </Button>
             </div>
           </div>
           
