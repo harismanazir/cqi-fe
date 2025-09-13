@@ -1,5 +1,5 @@
 /**
- * Complete API Client for Code Quality Insight Backend with GitHub Integration
+ * Enhanced API Client with Progressive Results Support for Code Quality Insight Backend
  */
 
 const API_BASE_URL = 'https://lobster-app-nqbfx.ondigitalocean.app';
@@ -58,6 +58,37 @@ export interface GitHubAnalysisResponse {
     language_breakdown: Record<string, { files: number; lines: number }>;
   };
   temp_dir?: string; // IMPORTANT: Added for Q&A system
+  progressive?: boolean; // NEW: Indicates progressive analysis support
+}
+
+// NEW: Progressive WebSocket message interface
+export interface ProgressiveWebSocketMessage {
+  type: 'progress' | 'partial_results' | 'final_results';
+  job_id: string;
+  progress?: number;
+  message?: string;
+  completed_files?: number;
+  total_files?: number;
+  results?: BackendAnalysisResult[];
+  timestamp: string;
+}
+
+// NEW: Partial results response interface
+export interface PartialResultsResponse {
+  success: boolean;
+  partial: boolean;
+  completed_files: number;
+  total_files: number;
+  progress: number;
+  job_id: string;
+  results: BackendAnalysisResult[];
+  github_metadata?: {
+    repo_url?: string;
+    branch?: string;
+    stats?: any;
+    analysis_type?: string;
+    temp_dir?: string;
+  };
 }
 
 // Backend API Response Types (matching the actual backend structure)
@@ -158,6 +189,9 @@ export interface AnalysisResult {
     analysis_type?: string;
     temp_dir?: string; // IMPORTANT: For Q&A system
   };
+  // NEW: Progressive metadata
+  isPartial?: boolean;
+  lastUpdated?: string;
 }
 
 export interface FileResult {
@@ -252,9 +286,14 @@ class ApiClient {
   }
 
   /**
-   * Start analysis job - Updated to match backend exactly
+   * ENHANCED: Start analysis job with progressive support
    */
-  async startAnalysis(filePaths: string[], jobId: string): Promise<{ success: boolean; job_id: string; results_count: number }> {
+  async startAnalysis(filePaths: string[], jobId: string): Promise<{ 
+    success: boolean; 
+    job_id: string; 
+    results_count?: number;
+    progressive?: boolean; // NEW: Indicates if progressive mode is enabled
+  }> {
     const response = await fetch(`${this.baseURL}/api/analyze/${jobId}`, {
       method: 'POST',
       headers: {
@@ -264,6 +303,7 @@ class ApiClient {
         file_paths: filePaths,
         detailed: true,
         rag: true,
+        progressive: true, // NEW: Request progressive analysis
       }),
     });
 
@@ -310,7 +350,7 @@ class ApiClient {
   }
 
   /**
-   * Analyze GitHub repository
+   * ENHANCED: Analyze GitHub repository with progressive support
    */
   async analyzeGitHubRepository(request: GitHubAnalyzeRequest, jobId?: string): Promise<GitHubAnalysisResponse> {
     const response = await fetch(`${this.baseURL}/api/github/analyze`, {
@@ -318,7 +358,10 @@ class ApiClient {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        ...request,
+        progressive: true, // NEW: Request progressive analysis
+      }),
     });
 
     if (!response.ok) {
@@ -344,7 +387,21 @@ class ApiClient {
   }
 
   /**
-   * Get analysis results and transform to frontend format
+   * NEW: Get partial results for progressive display
+   */
+  async getPartialResults(jobId: string): Promise<PartialResultsResponse> {
+    const response = await fetch(`${this.baseURL}/api/partial-results/${jobId}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to get partial results');
+    }
+
+    return response.json();
+  }
+
+  /**
+   * ENHANCED: Get analysis results and transform to frontend format
    */
   async getAnalysisResults(jobId: string): Promise<AnalysisResult> {
     const response = await fetch(`${this.baseURL}/api/results/${jobId}`);
@@ -357,10 +414,13 @@ class ApiClient {
     const backendData: BackendResultsResponse = await response.json();
     
     // Transform backend data to frontend format
-    return this.transformBackendResults(backendData);
+    return this.transformBackendResults(backendData, false);
   }
 
-private transformBackendResults(backendData: BackendResultsResponse): AnalysisResult {
+  /**
+   * ENHANCED: Transform backend results with progressive support
+   */
+  private transformBackendResults(backendData: BackendResultsResponse, isPartial: boolean = false): AnalysisResult {
     const results = backendData.results;
     
     // Calculate totals
@@ -419,7 +479,7 @@ private transformBackendResults(backendData: BackendResultsResponse): AnalysisRe
     const complexityIssues = agentBreakdown.complexity || 0;
     const documentationIssues = agentBreakdown.documentation || 0;
 
-    const transformedResult = {
+    const transformedResult: AnalysisResult = {
       job_id: backendData.job_id,
       summary: {
         total_files: totalFiles,
@@ -445,13 +505,75 @@ private transformBackendResults(backendData: BackendResultsResponse): AnalysisRe
       github_metadata: backendData.github_metadata,
     };
     
+    // Add progressive metadata if this is partial data
+    if (isPartial) {
+      transformedResult.isPartial = true;
+      transformedResult.lastUpdated = new Date().toISOString();
+    }
+    
     console.log('[API Transform] Final result summary:', transformedResult.summary);
     
     return transformedResult;
   }
 
   /**
-   * Start chat session - ENHANCED for GitHub support
+   * NEW: Transform partial results to AnalysisResult format
+   */
+  transformPartialResults(partialData: PartialResultsResponse): AnalysisResult | null {
+    if (!partialData.results || partialData.results.length === 0) {
+      return null;
+    }
+
+    // Create a mock BackendResultsResponse for transformation
+    const mockBackendResponse: BackendResultsResponse = {
+      success: true,
+      job_id: partialData.job_id,
+      results: partialData.results,
+      total_files: partialData.completed_files,
+      completion_time: new Date().toISOString(),
+      github_metadata: partialData.github_metadata
+    };
+
+    return this.transformBackendResults(mockBackendResponse, true);
+  }
+
+  /**
+   * ENHANCED: Create WebSocket connection for progressive real-time updates
+   */
+  createProgressiveWebSocket(
+    jobId: string, 
+    onMessage: (data: ProgressiveWebSocketMessage) => void, 
+    onError?: (error: Event) => void
+  ): WebSocket {
+    const wsUrl = this.baseURL.replace('https://', 'wss://').replace('http://', 'ws://');
+    const ws = new WebSocket(`${wsUrl}/api/progress/${jobId}`);
+    
+    ws.onmessage = (event) => {
+      try {
+        const data: ProgressiveWebSocketMessage = JSON.parse(event.data);
+        console.log('[API] Progressive WebSocket message:', data.type, data);
+        onMessage(data);
+      } catch (error) {
+        console.error('Failed to parse progressive WebSocket message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('Progressive WebSocket error:', error);
+      if (onError) {
+        onError(error);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('Progressive WebSocket connection closed');
+    };
+
+    return ws;
+  }
+
+  /**
+   * ENHANCED: Start chat session with GitHub support
    */
   async startChatSession(request?: ChatStartRequest): Promise<ChatSession> {
     console.log('[API] Starting chat session with request:', request);
@@ -502,32 +624,11 @@ private transformBackendResults(backendData: BackendResultsResponse): AnalysisRe
   }
 
   /**
-   * Create WebSocket connection for real-time progress
+   * DEPRECATED: Use createProgressiveWebSocket instead for better progressive support
    */
   createProgressWebSocket(jobId: string, onMessage: (data: any) => void, onError?: (error: Event) => void): WebSocket {
-    const ws = new WebSocket(`ws://localhost:8000/api/progress/${jobId}`);
-    
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessage(data);
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      if (onError) {
-        onError(error);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket connection closed');
-    };
-
-    return ws;
+    console.warn('[API] createProgressWebSocket is deprecated. Use createProgressiveWebSocket for enhanced progressive support.');
+    return this.createProgressiveWebSocket(jobId, onMessage, onError);
   }
 
   /**

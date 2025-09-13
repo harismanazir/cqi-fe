@@ -20,10 +20,12 @@ import {
   ExternalLink,
   Github,
   GitBranch,
-  Globe
+  Globe,
+  Loader2,
+  Eye
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiClient, AnalysisResult, AnalysisStatus } from '@/lib/api';
+import { apiClient, AnalysisResult, AnalysisStatus, BackendAnalysisResult } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { 
   PieChart, 
@@ -39,10 +41,19 @@ import {
 } from 'recharts';
 
 const Dashboard = () => {
+  // Existing state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisMessage, setAnalysisMessage] = useState('');
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult | null>(null);
+  
+  // NEW: Progressive state
+  const [partialResults, setPartialResults] = useState<BackendAnalysisResult[]>([]);
+  const [completedFiles, setCompletedFiles] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(0);
+  const [showPartialResults, setShowPartialResults] = useState(false);
+  const [isProgressiveMode, setIsProgressiveMode] = useState(false);
+  
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -56,81 +67,116 @@ const Dashboard = () => {
   // Determine if this is a GitHub analysis
   const isGitHubAnalysis = Boolean(githubRepo);
 
-  // Monitor analysis job if job ID is provided
+  // Enhanced monitoring with progressive support
   useEffect(() => {
     if (!jobId) return;
 
-    console.log('[Dashboard] Starting monitoring for job:', jobId);
-    console.log('[Dashboard] GitHub context:', { githubRepo, branch });
+    console.log('[Dashboard] Starting progressive monitoring for job:', jobId);
     
     let ws: WebSocket | null = null;
     let statusCheckInterval: NodeJS.Timeout | null = null;
 
-    const startMonitoring = async () => {
+    const startProgressiveMonitoring = async () => {
       try {
-        // Check initial job status
-        console.log('[Dashboard] Checking initial status...');
+        // Check initial status
         const status = await apiClient.getAnalysisStatus(jobId);
         console.log('[Dashboard] Initial status:', status);
         updateAnalysisState(status);
 
-        // If already completed, load results immediately
         if (status.status === 'completed') {
-          console.log('[Dashboard] Job already completed, loading results...');
-          await loadAnalysisResults();
+          await loadFinalResults();
         } else if (status.status === 'processing') {
-          // Set up WebSocket for real-time updates
-          console.log('[Dashboard] Setting up WebSocket...');
-          ws = apiClient.createProgressWebSocket(
-            jobId,
-            (data) => {
-              console.log('[Dashboard] WebSocket message:', data);
-              if (data.type === 'progress') {
-                setAnalysisProgress(data.progress);
-                setAnalysisMessage(data.message);
-                setIsAnalyzing(data.progress < 100);
-              }
-            },
-            (error) => {
-              console.error('WebSocket error:', error);
-              startStatusPolling();
-            }
-          );
-
-          startStatusPolling();
+          setIsProgressiveMode(true);
+          setShowPartialResults(true); // Show dashboard immediately
+          setupProgressiveWebSocket();
+          startProgressivePolling();
         }
 
       } catch (error) {
         console.error('Failed to start monitoring:', error);
         toast({
           title: "Monitoring Error",
-          description: "Failed to connect to analysis status. Please refresh the page.",
+          description: "Failed to connect to analysis status.",
           variant: "destructive"
         });
       }
     };
 
-    const startStatusPolling = () => {
-      console.log('[Dashboard] Starting status polling...');
+    const setupProgressiveWebSocket = () => {
+      console.log('[Dashboard] Setting up progressive WebSocket...');
+      
+      ws = apiClient.createProgressiveWebSocket(
+        jobId,
+        (data) => {
+          console.log('[Dashboard] Progressive WebSocket message:', data);
+          
+          if (data.type === 'progress') {
+            setAnalysisProgress(data.progress || 0);
+            setAnalysisMessage(data.message || '');
+            setCompletedFiles(data.completed_files || 0);
+            setTotalFiles(data.total_files || 0);
+            setIsAnalyzing((data.progress || 0) < 100);
+            
+            // Show success toast for file completions
+            if (data.message?.includes('✅') && (data.completed_files || 0) > completedFiles) {
+              toast({
+                title: "File Analyzed",
+                description: data.message,
+              });
+            }
+          } 
+          else if (data.type === 'partial_results' && data.results) {
+            console.log('[Dashboard] Received partial results:', data.results.length);
+            setPartialResults(data.results);
+            setCompletedFiles(data.completed_files || 0);
+            updatePartialDashboard(data.results);
+          }
+          else if (data.type === 'final_results') {
+            console.log('[Dashboard] Received final results notification');
+            setIsAnalyzing(false);
+            setIsProgressiveMode(false);
+            loadFinalResults();
+          }
+        },
+        (error) => {
+          console.error('Progressive WebSocket error:', error);
+          startProgressivePolling();
+        }
+      );
+    };
+
+    const startProgressivePolling = () => {
+      console.log('[Dashboard] Starting progressive polling...');
       statusCheckInterval = setInterval(async () => {
         try {
+          // Get partial results
+          const partialResponse = await apiClient.getPartialResults(jobId);
+          if (partialResponse.success && partialResponse.results.length > 0) {
+            console.log('[Dashboard] Polling partial results:', partialResponse.results.length);
+            setPartialResults(partialResponse.results);
+            setCompletedFiles(partialResponse.completed_files);
+            setTotalFiles(partialResponse.total_files);
+            updatePartialDashboard(partialResponse.results);
+          }
+          
+          // Check overall status
           const status = await apiClient.getAnalysisStatus(jobId);
-          console.log('[Dashboard] Polling status:', status);
           updateAnalysisState(status);
 
           if (status.status === 'completed') {
-            console.log('[Dashboard] Analysis completed! Loading results...');
             if (statusCheckInterval) clearInterval(statusCheckInterval);
             if (ws) ws.close();
-            await loadAnalysisResults();
+            await loadFinalResults();
           } else if (status.status === 'failed') {
             if (statusCheckInterval) clearInterval(statusCheckInterval);
             if (ws) ws.close();
+            setIsAnalyzing(false);
+            setIsProgressiveMode(false);
           }
         } catch (error) {
-          console.error('Status polling error:', error);
+          console.error('Progressive polling error:', error);
         }
-      }, 2000);
+      }, 3000); // Poll every 3 seconds
     };
 
     const updateAnalysisState = (status: AnalysisStatus) => {
@@ -147,37 +193,118 @@ const Dashboard = () => {
       }
     };
 
-    const loadAnalysisResults = async () => {
+    const updatePartialDashboard = (results: BackendAnalysisResult[]) => {
+      if (results.length === 0) return;
+      
+      console.log('[Dashboard] Updating partial dashboard with:', results.length, 'files');
+      
+      // Create partial AnalysisResult for dashboard display
+      const partialAnalysisResult = transformPartialResults(results);
+      setAnalysisResults(partialAnalysisResult);
+    };
+
+    const loadFinalResults = async () => {
       try {
-        console.log('[Dashboard] Loading analysis results...');
+        console.log('[Dashboard] Loading final results...');
         const results = await apiClient.getAnalysisResults(jobId);
-        console.log('[Dashboard] Results loaded:', results);
+        console.log('[Dashboard] Final results loaded:', results);
         setAnalysisResults(results);
         setIsAnalyzing(false);
+        setIsProgressiveMode(false);
         
         toast({
           title: "Analysis Complete!",
           description: isGitHubAnalysis 
             ? `GitHub repository analyzed: ${results.summary.total_issues} issues found`
-            : `Found ${results.summary.total_issues} issues across ${results.summary.total_files} files.`,
+            : `Analysis complete: ${results.summary.total_issues} issues found across ${results.summary.total_files} files.`,
         });
       } catch (error) {
-        console.error('Failed to load results:', error);
+        console.error('Failed to load final results:', error);
         toast({
           title: "Results Error",
-          description: "Analysis completed but failed to load results.",
+          description: "Analysis completed but failed to load final results.",
           variant: "destructive"
         });
       }
     };
 
-    startMonitoring();
+    startProgressiveMonitoring();
 
     return () => {
       if (ws) ws.close();
       if (statusCheckInterval) clearInterval(statusCheckInterval);
     };
   }, [jobId, toast, isGitHubAnalysis]);
+
+  // Transform partial results to AnalysisResult format
+  const transformPartialResults = (results: BackendAnalysisResult[]): AnalysisResult => {
+    const totalFiles = results.length;
+    const totalIssues = results.reduce((sum, file) => sum + file.total_issues, 0);
+    
+    const totalCriticalIssues = results.reduce((sum, file) => sum + file.critical_issues, 0);
+    const totalHighIssues = results.reduce((sum, file) => sum + file.high_issues, 0);
+    const totalMediumIssues = results.reduce((sum, file) => sum + file.medium_issues, 0);
+    const totalLowIssues = results.reduce((sum, file) => sum + file.low_issues, 0);
+    
+    // Aggregate agent breakdown
+    const agentBreakdown: Record<string, number> = {
+      security: 0,
+      performance: 0,
+      complexity: 0,
+      documentation: 0
+    };
+    
+    results.forEach(file => {
+      if (file.agent_breakdown) {
+        Object.entries(file.agent_breakdown).forEach(([agent, count]) => {
+          const agentKey = agent.toLowerCase();
+          if (agentKey in agentBreakdown) {
+            agentBreakdown[agentKey] += count;
+          }
+        });
+      }
+    });
+
+    return {
+      job_id: jobId!,
+      summary: {
+        total_files: totalFiles,
+        total_issues: totalIssues,
+        severity_breakdown: {
+          critical: totalCriticalIssues,
+          high: totalHighIssues,
+          medium: totalMediumIssues,
+          low: totalLowIssues,
+        },
+        agent_breakdown: agentBreakdown,
+        overall_score: Math.max(0, 100 - (totalIssues * 2)),
+      },
+      metrics: {
+        security_score: Math.max(0, 100 - (agentBreakdown.security * 5)),
+        performance_score: Math.max(0, 100 - (agentBreakdown.performance * 4)),
+        code_quality_score: Math.max(0, 100 - (agentBreakdown.complexity * 3)),
+        documentation_score: Math.max(0, 100 - (agentBreakdown.documentation * 2)),
+      },
+      files: results.map(file => ({
+        file: file.file,
+        path: file.file,
+        language: file.language,
+        lines: file.lines,
+        issues_count: file.total_issues,
+        issues: file.detailed_issues.map(issue => ({
+          title: issue.title,
+          description: issue.description,
+          severity: issue.severity,
+          agent: issue.agent,
+          line: issue.line,
+          suggestion: issue.fix,
+          file: issue.file
+        }))
+      })),
+      analysis_time: results.reduce((sum, file) => sum + file.processing_time, 0),
+      timestamp: new Date().toISOString(),
+    };
+  };
 
   // Helper functions
   const getLanguageColor = (language: string): string => {
@@ -238,12 +365,11 @@ const Dashboard = () => {
     { name: 'Low', value: analysisResults.summary.severity_breakdown.low, color: '#10B981' },
   ] : [];
 
-// Check if there are any issues at all
-const hasAnyIssues = severityData.some(item => item.value > 0);
+  // Check if there are any issues at all
+  const hasAnyIssues = severityData.some(item => item.value > 0);
 
-// Filter for chart display (only items with values > 0)
-const chartSeverityData = severityData.filter(item => item.value > 0);
-
+  // Filter for chart display (only items with values > 0)
+  const chartSeverityData = severityData.filter(item => item.value > 0);
 
   const agentData = analysisResults ? 
     Object.entries(analysisResults.summary.agent_breakdown).map(([agent, count]) => ({
@@ -266,34 +392,44 @@ const chartSeverityData = severityData.filter(item => item.value > 0);
       .slice(0, 10) : [];
 
   // Event handlers - FIXED to properly handle GitHub context
-const handleStartChat = () => {
-  console.log('[Dashboard] Starting chat with context:', { isGitHubAnalysis, githubRepo, branch, uploadDir });
-  
-  const params = new URLSearchParams();
-  
-  // ALWAYS pass upload_dir (works for both file upload and GitHub)
-  if (uploadDir) {
-    params.set('upload_dir', uploadDir);
-  }
-  
-  // Add GitHub context for display purposes
-  if (isGitHubAnalysis && githubRepo) {
-    params.set('github_repo', githubRepo);
-    params.set('branch', branch || 'main');
-  }
-  
-  console.log('[Dashboard] Chat params:', params.toString());
-  
-  navigate(`/chat/new?${params.toString()}`);
-};
+  const handleStartChat = () => {
+    console.log('[Dashboard] Starting chat with context:', { isGitHubAnalysis, githubRepo, branch, uploadDir });
+    
+    const params = new URLSearchParams();
+    
+    // ALWAYS pass upload_dir (works for both file upload and GitHub)
+    if (uploadDir) {
+      params.set('upload_dir', uploadDir);
+    }
+    
+    // Add GitHub context for display purposes
+    if (isGitHubAnalysis && githubRepo) {
+      params.set('github_repo', githubRepo);
+      params.set('branch', branch || 'main');
+    }
+    
+    console.log('[Dashboard] Chat params:', params.toString());
+    
+    navigate(`/chat/new?${params.toString()}`);
+  };
 
   const handleRefresh = async () => {
     if (!jobId) return;
     
     try {
-      console.log('[Dashboard] Refreshing results...');
-      const results = await apiClient.getAnalysisResults(jobId);
-      setAnalysisResults(results);
+      if (isProgressiveMode) {
+        // Refresh partial results
+        const partialData = await apiClient.getPartialResults(jobId);
+        if (partialData.success && partialData.results.length > 0) {
+          setPartialResults(partialData.results);
+          setCompletedFiles(partialData.completed_files);
+          updatePartialDashboard(partialData.results);
+        }
+      } else {
+        // Refresh final results
+        const results = await apiClient.getAnalysisResults(jobId);
+        setAnalysisResults(results);
+      }
       
       toast({
         title: "Results Refreshed",
@@ -307,6 +443,155 @@ const handleStartChat = () => {
         variant: "destructive"
       });
     }
+  };
+
+  // Progressive Analysis Status Component
+  const ProgressiveAnalysisStatus = () => {
+    if (!isAnalyzing && !isProgressiveMode) return null;
+
+    return (
+      <Card className="mb-6 border-primary/20 shadow-glow animate-pulse-slow">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold flex items-center gap-2">
+              <Clock className="w-5 h-5 animate-spin text-primary" />
+              {isGitHubAnalysis ? 'Analyzing GitHub Repository' : 'Running Progressive Analysis'}
+              {isProgressiveMode && (
+                <Badge variant="outline" className="ml-2 bg-blue-50 text-blue-700">
+                  Live Updates
+                </Badge>
+              )}
+            </h3>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {Math.round(analysisProgress)}% • {completedFiles}/{totalFiles} files
+              </span>
+              {showPartialResults && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPartialResults(!showPartialResults)}
+                  className="flex items-center gap-2"
+                >
+                  <Eye className="w-4 h-4" />
+                  {showPartialResults ? 'Hide' : 'Show'} Live Results
+                </Button>
+              )}
+            </div>
+          </div>
+          
+          <Progress value={analysisProgress} className="mb-3 h-3" />
+          
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {analysisMessage || (isGitHubAnalysis 
+                ? `Analyzing repository: ${githubRepo}...` 
+                : "Multi-agent analysis in progress...")}
+            </p>
+            
+            {partialResults.length > 0 && (
+              <Badge variant="outline" className="bg-green-50 text-green-700">
+                {partialResults.reduce((sum, r) => sum + r.total_issues, 0)} issues found so far
+              </Badge>
+            )}
+          </div>
+          
+          {/* File Progress Indicator */}
+          {totalFiles > 0 && (
+            <div className="mt-4 grid grid-cols-4 gap-4 text-center">
+              <div className="p-2 rounded-lg bg-red-50">
+                <Shield className="w-5 h-5 text-red-600 mx-auto mb-1" />
+                <p className="text-xs text-red-600 font-medium">Security</p>
+                <p className="text-xs text-red-500">
+                  {partialResults.reduce((sum, r) => sum + (r.agent_breakdown?.security || 0), 0)} issues
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-orange-50">
+                <Zap className="w-5 h-5 text-orange-600 mx-auto mb-1" />
+                <p className="text-xs text-orange-600 font-medium">Performance</p>
+                <p className="text-xs text-orange-500">
+                  {partialResults.reduce((sum, r) => sum + (r.agent_breakdown?.performance || 0), 0)} issues
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-blue-50">
+                <BarChart3 className="w-5 h-5 text-blue-600 mx-auto mb-1" />
+                <p className="text-xs text-blue-600 font-medium">Complexity</p>
+                <p className="text-xs text-blue-500">
+                  {partialResults.reduce((sum, r) => sum + (r.agent_breakdown?.complexity || 0), 0)} issues
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-green-50">
+                <FileSearch className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                <p className="text-xs text-green-600 font-medium">Documentation</p>
+                <p className="text-xs text-green-500">
+                  {partialResults.reduce((sum, r) => sum + (r.agent_breakdown?.documentation || 0), 0)} issues
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // File Progress List Component
+  const FileProgressList = () => {
+    if (!isProgressiveMode || partialResults.length === 0) return null;
+
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileCode className="w-5 h-5" />
+            File Analysis Progress ({completedFiles}/{totalFiles})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 max-h-64 overflow-y-auto">
+            {partialResults.map((file, index) => (
+              <div key={index} className="flex items-center justify-between p-3 rounded-lg border bg-green-50 border-green-200">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <div>
+                    <p className="font-medium text-sm">{file.file}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {file.language} • {file.lines} lines • {file.processing_time.toFixed(1)}s
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge 
+                    variant={file.total_issues > 0 ? "destructive" : "outline"}
+                    className="text-xs"
+                  >
+                    {file.total_issues} issues
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    ✅ Complete
+                  </Badge>
+                </div>
+              </div>
+            ))}
+            
+            {/* Show pending files */}
+            {isAnalyzing && completedFiles < totalFiles && (
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-blue-50 border-blue-200">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                  <div>
+                    <p className="font-medium text-sm">Analyzing next file...</p>
+                    <p className="text-xs text-blue-600">{totalFiles - completedFiles} files remaining</p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700">
+                  In Progress
+                </Badge>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   // GitHub Repository Header Component
@@ -394,7 +679,9 @@ const handleStartChat = () => {
           <div className="mb-8">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-gradient">Code Analysis Dashboard</h1>
+                <h1 className="text-3xl font-bold text-gradient">
+                  {isProgressiveMode ? 'Live Code Analysis Dashboard' : 'Code Analysis Dashboard'}
+                </h1>
                 <p className="text-muted-foreground mt-1">
                   {isGitHubAnalysis ? (
                     <>
@@ -405,6 +692,7 @@ const handleStartChat = () => {
                     <>LangGraph multi-agent analysis results</>
                   )}
                   {analysisResults && ` • ${analysisResults.summary.total_files} files analyzed`}
+                  {isProgressiveMode && ` • Live Updates Active`}
                   {jobId && ` • Job ID: ${jobId.slice(0, 8)}...`}
                 </p>
               </div>
@@ -432,49 +720,33 @@ const handleStartChat = () => {
           {/* GitHub Repository Header */}
           <GitHubRepoHeader />
 
-          {/* Analysis Progress */}
-          {isAnalyzing && (
-            <Card className="mb-6 border-primary/20 shadow-glow animate-pulse-slow">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Clock className="w-5 h-5 animate-spin text-primary" />
-                    {isGitHubAnalysis ? 'Analyzing GitHub Repository' : 'Running LangGraph Multi-Agent Analysis'}
-                  </h3>
-                  <span className="text-sm text-muted-foreground">{Math.round(analysisProgress)}%</span>
-                </div>
-                <Progress value={analysisProgress} className="mb-3 h-2" />
-                <p className="text-sm text-muted-foreground">
-                  {analysisMessage || (isGitHubAnalysis 
-                    ? `Downloading and analyzing repository: ${githubRepo}...` 
-                    : "Security, Performance, Complexity, and Documentation agents analyzing your code...")}
-                </p>
-                
-                <div className="mt-4 grid grid-cols-4 gap-4 text-center">
-                  <div className="p-2 rounded-lg bg-red-50">
-                    <Shield className="w-5 h-5 text-red-600 mx-auto mb-1" />
-                    <p className="text-xs text-red-600 font-medium">Security</p>
-                  </div>
-                  <div className="p-2 rounded-lg bg-orange-50">
-                    <Zap className="w-5 h-5 text-orange-600 mx-auto mb-1" />
-                    <p className="text-xs text-orange-600 font-medium">Performance</p>
-                  </div>
-                  <div className="p-2 rounded-lg bg-blue-50">
-                    <BarChart3 className="w-5 h-5 text-blue-600 mx-auto mb-1" />
-                    <p className="text-xs text-blue-600 font-medium">Complexity</p>
-                  </div>
-                  <div className="p-2 rounded-lg bg-green-50">
-                    <FileSearch className="w-5 h-5 text-green-600 mx-auto mb-1" />
-                    <p className="text-xs text-green-600 font-medium">Documentation</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {/* Progressive Analysis Status */}
+          <ProgressiveAnalysisStatus />
 
-          {/* Results Section - Only show if analysis is complete */}
-          {analysisResults && (
+          {/* File Progress List - Only show in progressive mode */}
+          <FileProgressList />
+
+          {/* Results Section - Show as soon as we have any results */}
+          {analysisResults && showPartialResults && (
             <>
+              {/* Show a banner indicating this is live/partial data */}
+              {isProgressiveMode && (
+                <Card className="mb-6 border-blue-200 bg-blue-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                      <div>
+                        <p className="font-medium text-blue-800">Live Analysis Results</p>
+                        <p className="text-sm text-blue-600">
+                          Results update automatically as each file completes analysis. 
+                          {isAnalyzing ? ` ${totalFiles - completedFiles} files remaining.` : ' Analysis complete!'}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <Card className="hover:shadow-medium transition-all duration-300 border-green-200 bg-green-50">
@@ -485,9 +757,14 @@ const handleStartChat = () => {
                       </div>
                       <Badge variant="outline" className="text-green-600 border-green-200">
                         {Math.round(analysisResults.summary.overall_score)}%
+                        {isProgressiveMode && (
+                          <span className="ml-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        )}
                       </Badge>
                     </div>
-                    <h3 className="font-semibold text-sm text-muted-foreground">Overall Score</h3>
+                    <h3 className="font-semibold text-sm text-muted-foreground">
+                      Overall Score {isProgressiveMode && '(Live)'}
+                    </h3>
                     <div className="text-2xl font-bold text-green-600 mt-1">
                       {Math.round(analysisResults.summary.overall_score)}/100
                     </div>
@@ -502,11 +779,17 @@ const handleStartChat = () => {
                       </div>
                       <Badge variant="outline" className="text-blue-600">
                         {analysisResults.summary.total_files}
+                        {isProgressiveMode && isAnalyzing && `/${totalFiles}`}
                       </Badge>
                     </div>
-                    <h3 className="font-semibold text-sm text-muted-foreground">Files Analyzed</h3>
+                    <h3 className="font-semibold text-sm text-muted-foreground">
+                      Files {isProgressiveMode && isAnalyzing ? 'Completed' : 'Analyzed'}
+                    </h3>
                     <div className="text-2xl font-bold text-blue-600 mt-1">
                       {analysisResults.summary.total_files}
+                      {isProgressiveMode && isAnalyzing && (
+                        <span className="text-lg text-muted-foreground">/{totalFiles}</span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -519,9 +802,14 @@ const handleStartChat = () => {
                       </div>
                       <Badge variant="outline" className="text-orange-600">
                         {analysisResults.summary.total_issues}
+                        {isProgressiveMode && (
+                          <span className="ml-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+                        )}
                       </Badge>
                     </div>
-                    <h3 className="font-semibold text-sm text-muted-foreground">Total Issues</h3>
+                    <h3 className="font-semibold text-sm text-muted-foreground">
+                      Issues Found {isProgressiveMode && '(So Far)'}
+                    </h3>
                     <div className="text-2xl font-bold text-orange-600 mt-1">
                       {analysisResults.summary.total_issues}
                     </div>
@@ -538,7 +826,9 @@ const handleStartChat = () => {
                         {Math.round(analysisResults.analysis_time)}s
                       </Badge>
                     </div>
-                    <h3 className="font-semibold text-sm text-muted-foreground">Analysis Time</h3>
+                    <h3 className="font-semibold text-sm text-muted-foreground">
+                      {isProgressiveMode && isAnalyzing ? 'Time Elapsed' : 'Analysis Time'}
+                    </h3>
                     <div className="text-2xl font-bold text-purple-600 mt-1">
                       {Math.round(analysisResults.analysis_time)}s
                     </div>
@@ -546,7 +836,7 @@ const handleStartChat = () => {
                 </Card>
               </div>
 
-              {/* Agent Performance Cards - FIXED */}
+              {/* Agent Performance Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <Card className="hover:shadow-medium transition-all duration-300 border-red-200">
                   <CardContent className="p-6">
@@ -640,55 +930,54 @@ const handleStartChat = () => {
               {/* Charts Section */}
               <div className="grid lg:grid-cols-3 gap-6 mb-8">
                 {/* Issue Severity Distribution - Always show */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-warning" />
-                        Issue Severity
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {hasAnyIssues ? (
-                        <ResponsiveContainer width="100%" height={250}>
-                          <PieChart>
-                            <Pie
-                              data={chartSeverityData}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={80}
-                              dataKey="value"
-                              label={({ name, value }) => `${name}: ${value}`}
-                            >
-                              {chartSeverityData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="h-[250px] flex flex-col items-center justify-center text-center">
-                          <CheckCircle className="w-16 h-16 text-green-500 mb-4" />
-                          <h3 className="text-lg font-semibold text-green-700 mb-2">No Issues Found!</h3>
-                          <p className="text-sm text-green-600">
-                            Your code analysis completed successfully with no issues detected.
-                          </p>
-                          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                            {severityData.map((item) => (
-                              <div key={item.name} className="flex items-center gap-2">
-                                <div 
-                                  className="w-3 h-3 rounded-full" 
-                                  style={{ backgroundColor: item.color }}
-                                ></div>
-                                <span className="text-green-600">{item.name}: 0</span>
-                              </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 text-warning" />
+                      Issue Severity
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {hasAnyIssues ? (
+                      <ResponsiveContainer width="100%" height={250}>
+                        <PieChart>
+                          <Pie
+                            data={chartSeverityData}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            dataKey="value"
+                            label={({ name, value }) => `${name}: ${value}`}
+                          >
+                            {chartSeverityData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
-                          </div>
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-[250px] flex flex-col items-center justify-center text-center">
+                        <CheckCircle className="w-16 h-16 text-green-500 mb-4" />
+                        <h3 className="text-lg font-semibold text-green-700 mb-2">No Issues Found!</h3>
+                        <p className="text-sm text-green-600">
+                          Your code analysis completed successfully with no issues detected.
+                        </p>
+                        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                          {severityData.map((item) => (
+                            <div key={item.name} className="flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: item.color }}
+                              ></div>
+                              <span className="text-green-600">{item.name}: 0</span>
+                            </div>
+                          ))}
                         </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 {/* Language Distribution */}
                 {languageData.length > 0 && (
@@ -848,7 +1137,7 @@ const handleStartChat = () => {
           )}
 
           {/* Show message when no analysis results and not analyzing */}
-          {!isAnalyzing && !analysisResults && jobId && (
+          {!isAnalyzing && !analysisResults && jobId && !isProgressiveMode && (
             <Card className="p-12 text-center border-yellow-200 bg-yellow-50">
               <div className="space-y-4">
                 <Clock className="w-16 h-16 mx-auto text-yellow-600" />
