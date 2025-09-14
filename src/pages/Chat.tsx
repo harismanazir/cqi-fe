@@ -334,6 +334,81 @@ const MessageComponent: React.FC<MessageProps> = ({ message, isTyping = false, o
   );
 };
 
+// Engaging loading messages component
+const EngagingLoader: React.FC<{ codebaseType: 'github' | 'upload' | 'unknown' }> = ({ codebaseType }) => {
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+
+  const githubMessages = [
+    "Connecting to GitHub repository...",
+    "Establishing secure connection...",
+    "Loading codebase structure...",
+    "Just a moment more...",
+    "Almost there...",
+    "Connecting to knowledge base...",
+    "Preparing AI analysis...",
+    "Ready to chat!"
+  ];
+
+  const uploadMessages = [
+    "Loading your uploaded files...",
+    "Analyzing file structure...",
+    "Building knowledge base...", 
+    "Just a moment more...",
+    "Almost there...",
+    "Connecting to AI system...",
+    "Preparing intelligent insights...",
+    "Ready to chat!"
+  ];
+
+  const defaultMessages = [
+    "Initializing chat session...",
+    "Loading codebase context...",
+    "Building knowledge base...",
+    "Just a moment more...",
+    "Almost there...",
+    "Connecting AI system...",
+    "Preparing insights...",
+    "Ready to chat!"
+  ];
+
+  const messages = codebaseType === 'github' ? githubMessages 
+                 : codebaseType === 'upload' ? uploadMessages 
+                 : defaultMessages;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentMessageIndex(prev => {
+        if (prev < messages.length - 1) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    }, 800); // Change message every 800ms
+
+    return () => clearInterval(interval);
+  }, [messages.length]);
+
+  return (
+    <div className="flex gap-4 justify-start">
+      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
+        <Bot className="w-5 h-5 text-white" />
+      </div>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl px-6 py-4 border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex space-x-1">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+          </div>
+          <span className="text-sm text-gray-600 dark:text-gray-400 transition-all duration-300">
+            {messages[currentMessageIndex]}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -367,6 +442,13 @@ const Chat = () => {
       console.log('[Chat] Initializing chat session...');
       console.log('[Chat] URL params:', { uploadDir, githubRepo, branch });
       setIsInitializing(true);
+      
+      // Set codebase type early for loader
+      if (githubRepo) {
+        setCodebaseContext(prev => ({ ...prev, type: 'github' }));
+      } else if (uploadDir) {
+        setCodebaseContext(prev => ({ ...prev, type: 'upload' }));
+      }
       
       // UNIFIED REQUEST: Both flows use upload_dir
       const request: any = {
@@ -409,7 +491,17 @@ const Chat = () => {
       
     } catch (error) {
       console.error('Failed to initialize chat:', error);
-      // ... error handling
+      // Set fallback welcome message on error
+      const fallbackMessage = createFallbackWelcomeMessage();
+      setMessages([fallbackMessage]);
+      
+      toast({
+        title: "Connection Issue",
+        description: "Using demo mode. Please refresh to try again.",
+        variant: "destructive"
+      });
+      
+      setSessionId('demo-session');
     } finally {
       setIsInitializing(false);
     }
@@ -509,6 +601,7 @@ Ask me anything about your code! I'll provide helpful responses using demo data.
     };
   };
 
+  // Reduced to only 2 quick questions as requested
   const quickQuestions = [
     {
       icon: Shield,
@@ -519,16 +612,6 @@ Ask me anything about your code! I'll provide helpful responses using demo data.
       icon: Zap,
       text: "How can I improve performance?",
       color: "text-orange-600 bg-orange-50 border-orange-200"
-    },
-    {
-      icon: Code,
-      text: "Explain this function to me",
-      color: "text-blue-600 bg-blue-50 border-blue-200"
-    },
-    {
-      icon: FileSearch,
-      text: "Review my code quality",
-      color: "text-green-600 bg-green-50 border-green-200"
     }
   ];
 
@@ -881,7 +964,13 @@ I'm still here to help using demo responses while we resolve this issue!`,
         <div className="flex-1 overflow-hidden">
           <div className="h-full overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
             <div className="max-w-4xl mx-auto space-y-6">
-              {messages.map((message) => (
+              {/* Show engaging loader during initialization */}
+              {isInitializing && (
+                <EngagingLoader codebaseType={codebaseContext.type} />
+              )}
+
+              {/* Show messages only after initialization */}
+              {!isInitializing && messages.map((message) => (
                 <MessageComponent
                   key={message.id}
                   message={message}
@@ -890,8 +979,8 @@ I'm still here to help using demo responses while we resolve this issue!`,
                 />
               ))}
               
-              {/* Enhanced Loading State */}
-              {isLoading && (
+              {/* Regular loading state for chat messages */}
+              {isLoading && !isInitializing && (
                 <div className="flex gap-4 justify-start">
                   <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
                     <Bot className="w-5 h-5 text-white" />
@@ -917,7 +1006,7 @@ I'm still here to help using demo responses while we resolve this issue!`,
         </div>
 
         {/* Quick Questions - Conditionally Rendered, Fixed Height */}
-        {messages.length === 1 && (
+        {!isInitializing && messages.length === 1 && (
           <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
             <div className="max-w-4xl mx-auto">
               <h3 className="text-sm font-medium mb-3 flex items-center gap-2">

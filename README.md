@@ -1,73 +1,156 @@
-# Welcome to your Lovable project
+# Code Quality Insight - Frontend
 
-## Project info
+A modern React-based frontend application for analyzing code quality and providing insights through AI-powered analysis.
 
-**URL**: https://lovable.dev/projects/51e0ca67-32a5-4160-8ef2-4a75adb81049
+## Features
 
-## How can I edit this code?
+- 🔍 **Code Analysis**: Upload files or connect GitHub repositories for comprehensive code quality analysis
+- 💬 **AI Chat Interface**: Interactive chat with AI agents for code insights and recommendations
+- 📊 **Visual Analytics**: Charts and dashboards displaying code quality metrics
+- 🔗 **GitHub Integration**: Direct repository analysis via GitHub URL
+- 📁 **File Explorer**: Browse and analyze uploaded code files
+- 🎯 **Multiple Analysis Types**: Security, performance, best practices, and more
 
-There are several ways of editing your application.
+## Prerequisites
 
-**Use Lovable**
+Before setting up the project, ensure you have:
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/51e0ca67-32a5-4160-8ef2-4a75adb81049) and start prompting.
+- **Node.js** (version 16 or higher) - [Download here](https://nodejs.org/)
+- **npm** or **yarn** package manager
+- **Backend API** running on `http://localhost:8000` (see API configuration below)
 
-Changes made via Lovable will be committed automatically to this repo.
+## Setup Instructions
 
-**Use your preferred IDE**
+### 1. Clone the Repository
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+git clone <repository-url>
+cd frontend-cqi
 ```
 
-**Edit a file directly in GitHub**
+### 2. Install Dependencies
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+npm install
+# or
+yarn install
+```
 
-**Use GitHub Codespaces**
+### 3. Backend Setup
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Clone and set up the backend server:
 
-## What technologies are used for this project?
+```bash
+git clone https://github.com/harismanazir/cqi-be
+cd cqi-be
+```
 
-This project is built with:
+Follow the setup instructions in the backend repository's README to install dependencies and start the server.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### 4. Configure Backend API
 
-## How can I deploy this project?
+After hosting your backend server, update the API configuration in `src/lib/api.ts` with your hosted server URL:
 
-Simply open [Lovable](https://lovable.dev/projects/51e0ca67-32a5-4160-8ef2-4a75adb81049) and click on Share -> Publish.
+```typescript
+const API_BASE_URL = 'your-hosted-server-url'; // Replace with your backend server URL
+```
 
-## Can I connect a custom domain to my Lovable project?
+### 5. Start Development Server
 
-Yes, you can!
+```bash
+npm run dev
+# or
+yarn dev
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+The application will be available at `http://localhost:5173`
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+### 6. Build for Production
+
+```bash
+npm run build
+# or
+yarn build
+```
+
+### 7. Preview Production Build
+
+```bash
+npm run preview
+# or
+yarn preview
+```
+
+## Project Structure
+
+```
+src/
+├── components/          # Reusable UI components
+│   ├── ui/             # shadcn/ui components
+│   ├── Sidebar.tsx     # Navigation sidebar
+│   ├── FileUpload.tsx  # File upload functionality
+│   ├── GitHubUpload.tsx # GitHub integration
+│   └── AnalysisCharts.tsx # Data visualization
+├── pages/              # Main application pages
+│   ├── Landing.tsx     # Landing page
+│   ├── Dashboard.tsx   # Main dashboard
+│   ├── Chat.tsx        # AI chat interface
+│   └── Index.tsx       # Home page
+├── lib/                # Utilities and API client
+│   └── api.ts          # Backend API integration
+└── hooks/              # Custom React hooks
+```
+
+## Technologies Used
+
+- **React 18** - Modern React with hooks
+- **TypeScript** - Type-safe development
+- **Vite** - Fast build tool and dev server
+- **Tailwind CSS** - Utility-first CSS framework
+- **shadcn/ui** - Modern component library
+- **React Router** - Client-side routing
+- **React Query** - Data fetching and caching
+- **Lucide React** - Icon library
+- **Recharts** - Data visualization
+
+## Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run build:dev` - Build in development mode
+- `npm run lint` - Run ESLint
+- `npm run preview` - Preview production build
+
+## API Integration
+
+The frontend communicates with a backend API for:
+
+- File upload and processing
+- GitHub repository analysis
+- AI-powered chat interactions
+- Code quality metrics generation
+
+Make sure your backend API is running and accessible at the configured URL.
+
+## Development
+
+### Adding New Components
+
+When creating new components, follow the existing patterns:
+- Use TypeScript interfaces for props
+- Follow the shadcn/ui component structure
+- Add appropriate error handling
+- Include proper accessibility attributes
+
+### State Management
+
+The application uses React's built-in state management with:
+- useState for component state
+- useContext for shared state
+- React Query for server state
+
+### Styling
+
+- Use Tailwind CSS utility classes
+- Follow the design system established by shadcn/ui
+- Maintain consistent spacing and typography

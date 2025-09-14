@@ -15,7 +15,8 @@ import {
   Archive,
   Loader2,
   Github,
-  HardDrive
+  HardDrive,
+  Info
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, UploadedFile } from '@/lib/api';
@@ -42,6 +43,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
   const [uploadDir, setUploadDir] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState('files');
+  const [showProcessingNotice, setShowProcessingNotice] = useState(false);
+  const [hasStartedUpload, setHasStartedUpload] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -73,6 +76,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
   const processFiles = async (fileList: File[]) => {
     try {
       console.log('[FileUpload] Starting file upload process...');
+      
+      // Show processing notice when upload starts
+      setShowProcessingNotice(true);
+      setHasStartedUpload(true);
       
       const newFiles: UploadedFileUI[] = fileList.map(file => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -268,6 +275,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
   const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
     console.log('[FileUpload] GitHub analysis started:', jobId, repoInfo);
     
+    // Show processing notice when GitHub analysis starts
+    setShowProcessingNotice(true);
+    setHasStartedUpload(true);
+    
     // Navigate using upload_dir for both flows
     const params = new URLSearchParams({
       job_id: jobId,
@@ -322,6 +333,28 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
+      {/* Processing Notice - Shows when upload/analysis starts */}
+      {showProcessingNotice && hasStartedUpload && (
+        <div className="flex items-start gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 text-left">
+            <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-1">
+              Processing Time Notice
+            </p>
+            <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+              Processing time scales with file count and complexity. Large repositories 
+              may experience extended analysis times. Thank you for your patience.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowProcessingNotice(false)}
+            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="files" className="flex items-center gap-2">
@@ -484,10 +517,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
                           {file.status === 'error' && (
                             <p className="text-xs text-red-600 mt-1">Upload failed</p>
                           )}
-                          
-                          {/* {file.status === 'completed' && (
-                            <p className="text-xs text-green-600 mt-1">✅ Ready for analysis</p>
-                          )} */}
                         </div>
                       </div>
                     );
@@ -515,7 +544,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
                 {allFilesCompleted && files.length > 0 && (
                   <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
                     <p className="text-sm text-green-800">
-                      ✅ All files ready for analysis! Click "Analyze Code" to start.
+                      All files ready for analysis! Click "Analyze Code" to start.
                     </p>
                   </div>
                 )}

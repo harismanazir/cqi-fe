@@ -15,7 +15,9 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  Globe
+  Globe,
+  Info,
+  X
 } from 'lucide-react';
 import { apiClient, GitHubValidationResponse } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +32,8 @@ export const GitHubUpload: React.FC<GitHubUploadProps> = ({ onAnalysisStart }) =
   const [repoInfo, setRepoInfo] = useState<GitHubValidationResponse | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showProcessingNotice, setShowProcessingNotice] = useState(false);
+  const [hasValidatedRepo, setHasValidatedRepo] = useState(false);
   const { toast } = useToast();
 
   const handleValidateRepo = async () => {
@@ -51,6 +55,10 @@ export const GitHubUpload: React.FC<GitHubUploadProps> = ({ onAnalysisStart }) =
       setRepoInfo(result);
       
       if (result.valid) {
+        // Show processing notice when validation is successful
+        setShowProcessingNotice(true);
+        setHasValidatedRepo(true);
+        
         setSelectedBranch(result.default_branch || 'main');
         toast({
           title: "Repository Found",
@@ -143,89 +151,29 @@ const handleAnalyzeRepo = async () => {
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
-      {/* GitHub URL Input */}
-      <Card className="border-2 border-dashed border-primary/30 hover:border-primary/50 transition-all duration-300">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Github className="w-5 h-5" />
-            Analyze GitHub Repository
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Repository URL</label>
-            <div className="flex gap-2">
-              <Input
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="https://github.com/owner/repository"
-                disabled={isValidating || isAnalyzing}
-                className="flex-1"
-              />
-              <Button
-                onClick={handleValidateRepo}
-                disabled={isValidating || isAnalyzing || !repoUrl.trim()}
-                variant="outline"
-              >
-                {isValidating ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Validate'
-                )}
-              </Button>
-            </div>
+      {/* Processing Notice - Shows when repository is validated successfully */}
+      {showProcessingNotice && hasValidatedRepo && repoInfo?.valid && (
+        <div className="flex items-start gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 text-left">
+            <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-1">
+              Processing Time Notice
+            </p>
+            <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+              Processing time scales with repository size and complexity. Large repositories 
+              may experience extended analysis times. Thank you for your patience.
+            </p>
           </div>
+          <button
+            onClick={() => setShowProcessingNotice(false)}
+            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
-          {/* Branch Selection */}
-          {repoInfo?.valid && repoInfo.branches && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Branch</label>
-              <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {repoInfo.branches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>
-                      <div className="flex items-center gap-2">
-                        <GitBranch className="w-4 h-4" />
-                        {branch}
-                        {branch === repoInfo.default_branch && (
-                          <Badge variant="secondary" className="text-xs">default</Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Analyze Button */}
-          {repoInfo?.valid && (
-            <Button
-              onClick={handleAnalyzeRepo}
-              disabled={isAnalyzing}
-              variant="hero"
-              className="w-full"
-            >
-              {isAnalyzing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Starting Analysis...
-                </>
-              ) : (
-                <>
-                  <Code className="w-4 h-4 mr-2" />
-                  Analyze Repository
-                </>
-              )}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Repository Info */}
+      {/* Repository Info - Shows above input when validated */}
       {repoInfo && (
         <Card className={`${repoInfo.valid ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
           <CardContent className="p-6">
@@ -296,6 +244,51 @@ const handleAnalyzeRepo = async () => {
                     <Badge variant="outline">{repoInfo.open_issues} open issues</Badge>
                   )}
                 </div>
+
+                {/* Branch Selection - Moved here from input card */}
+                {repoInfo.branches && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Branch</label>
+                    <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {repoInfo.branches.map((branch) => (
+                          <SelectItem key={branch} value={branch}>
+                            <div className="flex items-center gap-2">
+                              <GitBranch className="w-4 h-4" />
+                              {branch}
+                              {branch === repoInfo.default_branch && (
+                                <Badge variant="secondary" className="text-xs">default</Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Analyze Button - Moved here from input card */}
+                <Button
+                  onClick={handleAnalyzeRepo}
+                  disabled={isAnalyzing}
+                  variant="hero"
+                  className="w-full"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Starting Analysis...
+                    </>
+                  ) : (
+                    <>
+                      <Code className="w-4 h-4 mr-2" />
+                      Analyze Repository
+                    </>
+                  )}
+                </Button>
               </div>
             ) : (
               <div className="flex items-center gap-3">
@@ -309,6 +302,41 @@ const handleAnalyzeRepo = async () => {
           </CardContent>
         </Card>
       )}
+
+      {/* GitHub URL Input */}
+      <Card className="border-2 border-dashed border-primary/30 hover:border-primary/50 transition-all duration-300">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Github className="w-5 h-5" />
+            Analyze GitHub Repository
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Repository URL</label>
+            <div className="flex gap-2">
+              <Input
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/owner/repository"
+                disabled={isValidating || isAnalyzing}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleValidateRepo}
+                disabled={isValidating || isAnalyzing || !repoUrl.trim()}
+                variant="outline"
+              >
+                {isValidating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Validate'
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Usage Tips */}
       <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">

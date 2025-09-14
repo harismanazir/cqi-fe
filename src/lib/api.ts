@@ -2,7 +2,7 @@
  * Enhanced API Client with Progressive Results Support for Code Quality Insight Backend
  */
 
-const API_BASE_URL = 'https://lobster-app-nqbfx.ondigitalocean.app';
+const API_BASE_URL = 'https://lobster-app-nqbfx.ondigitalocean.app'; // Update with actual backend URL
 
 export interface UploadedFile {
   name: string;
