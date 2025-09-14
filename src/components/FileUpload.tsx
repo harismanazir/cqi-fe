@@ -86,63 +86,106 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
       setFiles(prev => [...prev, ...newFiles]);
       setIsUploading(true);
 
-      // Simulate upload progress
-      newFiles.forEach(file => {
-        let progress = 0;
-        const progressInterval = setInterval(() => {
-          progress += Math.random() * 30;
-          if (progress >= 100) {
-            progress = 100;
-            clearInterval(progressInterval);
+      // ✅ FIXED: Synchronized progress simulation
+      let globalProgress = 0;
+      const progressInterval = setInterval(() => {
+        globalProgress += Math.random() * 15 + 10; // More consistent increments (10-25%)
+        
+        if (globalProgress >= 95) {
+          globalProgress = 95; // Stop at 95% until real upload completes
+          clearInterval(progressInterval);
+        }
+        
+        // Update all files with the same progress
+        setFiles(prev => prev.map(file => {
+          if (newFiles.some(nf => nf.id === file.id) && file.status === 'uploading') {
+            return { ...file, progress: Math.min(globalProgress, 95) };
           }
-          
-          setFiles(prev => {
-            const updated = [...prev];
-            const targetFile = updated.find(f => f.id === file.id);
-            if (targetFile && progress < 100) {
-              targetFile.progress = progress;
-            }
-            return updated;
-          });
-        }, 200);
-      });
+          return file;
+        }));
+      }, 300); // Slightly slower, more realistic
 
       // Upload files to backend using real API
       console.log('[FileUpload] Calling API uploadFiles...');
       const result = await apiClient.uploadFiles(fileList);
       console.log('[FileUpload] Upload response:', result);
       
-      // Update files with backend response
-      const completedFiles: UploadedFileUI[] = result.files.map((backendFile, index) => ({
-        ...newFiles[index],
-        status: 'completed',
-        progress: 100,
-        path: backendFile.path
-      }));
-
-      setFiles(prev => {
-        const updated = [...prev];
-        completedFiles.forEach((completedFile, index) => {
-          const fileIndex = updated.findIndex(f => f.id === newFiles[index].id);
-          if (fileIndex !== -1) {
-            updated[fileIndex] = completedFile;
+      // Clear progress interval
+      clearInterval(progressInterval);
+      
+      // ✅ FIXED: Handle ZIP extraction properly
+      let completedFiles: UploadedFileUI[];
+      
+      const hasZipFiles = fileList.some(file => file.name.endsWith('.zip'));
+      
+      if (hasZipFiles) {
+        // ZIP files were uploaded - use extracted files from backend
+        console.log('[FileUpload] ZIP detected, using extracted files from backend');
+        console.log('[FileUpload] Backend returned files:', result.files);
+        
+        completedFiles = result.files.map(backendFile => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name: backendFile.name,        // ✅ Extracted file name
+          size: backendFile.size,        // ✅ Extracted file size  
+          type: backendFile.type,        // ✅ "code" type
+          status: 'completed' as const,
+          progress: 100,
+          path: backendFile.path         // ✅ Extracted file path for analysis
+        }));
+        
+        console.log('[FileUpload] Completed files after ZIP extraction:', completedFiles);
+        
+        // Smooth transition to 100% for all files before replacing
+        setFiles(prev => prev.map(file => {
+          if (newFiles.some(nf => nf.id === file.id)) {
+            return { ...file, progress: 100, status: 'completed' };
           }
+          return file;
+        }));
+        
+        // Replace with extracted files after a short delay for smooth UX
+        setTimeout(() => {
+          setFiles(completedFiles);
+        }, 500);
+        
+      } else {
+        // Regular files - map normally with synchronized completion
+        console.log('[FileUpload] Regular files, mapping normally');
+        completedFiles = result.files.map((backendFile, index) => ({
+          ...newFiles[index],
+          status: 'completed' as const,
+          progress: 100,
+          path: backendFile.path
+        }));
+        
+        // Update all files to 100% simultaneously
+        setFiles(prev => {
+          const updated = [...prev];
+          completedFiles.forEach((completedFile, index) => {
+            const fileIndex = updated.findIndex(f => f.id === newFiles[index].id);
+            if (fileIndex !== -1) {
+              updated[fileIndex] = completedFile;
+            }
+          });
+          return updated;
         });
-        return updated;
-      });
+      }
 
       setUploadDir(result.upload_dir);
       setIsUploading(false);
 
+      const fileCount = completedFiles.length;
+      const fileType = hasZipFiles ? 'extracted from ZIP' : 'uploaded';
+
       toast({
         title: "Upload Successful!",
-        description: `${result.files.length} files uploaded successfully.`,
+        description: `${fileCount} files ${fileType} successfully.`,
       });
 
     } catch (error) {
       console.error('Upload failed:', error);
       
-      // Mark all new files as error
+      // Mark all new files as error with synchronized update
       setFiles(prev => prev.map(file => 
         newFiles.some(nf => nf.id === file.id) 
           ? { ...file, status: 'error', progress: 0 }
@@ -167,6 +210,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
         .filter(file => file.status === 'completed' && file.path)
         .map(file => file.path!);
 
+      console.log('[FileUpload] File paths for analysis:', filePaths);
+
       if (filePaths.length === 0) {
         toast({
           title: "No Files Ready",
@@ -181,7 +226,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
       // Generate job ID
       const jobId = crypto.randomUUID();
       console.log('[FileUpload] Generated job ID:', jobId);
-      console.log('[FileUpload] File paths for analysis:', filePaths);
       
       // Start analysis using real API
       const result = await apiClient.startAnalysis(filePaths, jobId);
@@ -221,30 +265,30 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalysisStart }) => {
     }
   };
 
-const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
-  console.log('[FileUpload] GitHub analysis started:', jobId, repoInfo);
-  
-  // FIXED: Navigate using upload_dir for both flows
-  const params = new URLSearchParams({
-    job_id: jobId,
-    upload_dir: repoInfo.upload_dir || '',  // CRITICAL: Pass upload_dir
-    // Keep GitHub metadata for display purposes
-    github_repo: encodeURIComponent(repoInfo.full_name || repoInfo.repo_url || ''),
-    branch: repoInfo.branch || 'main'
-  });
-  
-  console.log('[FileUpload] Navigating with params:', params.toString());
-  
-  navigate(`/dashboard?${params.toString()}`);
-  
-  // Call parent callback if provided
-  if (onAnalysisStart) {
-    onAnalysisStart(jobId, {
-      ...repoInfo,
-      source: 'github'
+  const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
+    console.log('[FileUpload] GitHub analysis started:', jobId, repoInfo);
+    
+    // Navigate using upload_dir for both flows
+    const params = new URLSearchParams({
+      job_id: jobId,
+      upload_dir: repoInfo.upload_dir || '',  // CRITICAL: Pass upload_dir
+      // Keep GitHub metadata for display purposes
+      github_repo: encodeURIComponent(repoInfo.full_name || repoInfo.repo_url || ''),
+      branch: repoInfo.branch || 'main'
     });
-  }
-};
+    
+    console.log('[FileUpload] Navigating with params:', params.toString());
+    
+    navigate(`/dashboard?${params.toString()}`);
+    
+    // Call parent callback if provided
+    if (onAnalysisStart) {
+      onAnalysisStart(jobId, {
+        ...repoInfo,
+        source: 'github'
+      });
+    }
+  };
 
   const removeFile = (fileId: string) => {
     setFiles(prev => prev.filter(file => file.id !== fileId));
@@ -270,8 +314,11 @@ const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
     return File;
   };
 
+  // Updated conditions for better state management
   const hasCompletedFiles = files.some(file => file.status === 'completed');
   const allFilesCompleted = files.length > 0 && files.every(file => file.status === 'completed');
+  const hasFailedFiles = files.some(file => file.status === 'error');
+  const hasUploadingFiles = files.some(file => file.status === 'uploading');
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
@@ -352,7 +399,9 @@ const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-semibold">Uploaded Files ({files.length})</h4>
+                  <h4 className="font-semibold">
+                    {files.some(f => f.name.endsWith('.zip') || f.type === 'code') ? 'Code Files' : 'Uploaded Files'} ({files.length})
+                  </h4>
                   {allFilesCompleted && (
                     <Button 
                       onClick={handleAnalyze}
@@ -371,6 +420,22 @@ const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
                     </Button>
                   )}
                 </div>
+                
+                {/* Global Upload Progress */}
+                {hasUploadingFiles && (
+                  <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-blue-800">Upload Progress</span>
+                      <span className="text-sm text-blue-600">
+                        {Math.round(files.find(f => f.status === 'uploading')?.progress || 0)}%
+                      </span>
+                    </div>
+                    <Progress 
+                      value={files.find(f => f.status === 'uploading')?.progress || 0} 
+                      className="h-2"
+                    />
+                  </div>
+                )}
                 
                 <div className="space-y-3">
                   {files.map((file) => {
@@ -402,6 +467,7 @@ const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
                                   removeFile(file.id);
                                 }}
                                 className="text-muted-foreground hover:text-destructive transition-colors"
+                                disabled={isUploading}
                               >
                                 <X className="w-4 h-4" />
                               </button>
@@ -418,16 +484,38 @@ const handleGitHubAnalysisStart = (jobId: string, repoInfo: any) => {
                           {file.status === 'error' && (
                             <p className="text-xs text-red-600 mt-1">Upload failed</p>
                           )}
+                          
+                          {/* {file.status === 'completed' && (
+                            <p className="text-xs text-green-600 mt-1">✅ Ready for analysis</p>
+                          )} */}
                         </div>
                       </div>
                     );
                   })}
                 </div>
                 
-                {hasCompletedFiles && !allFilesCompleted && (
-                  <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <p className="text-sm text-yellow-800">
-                      Some files are still uploading. Please wait for all files to complete before analyzing.
+                {/* Status Messages */}
+                {hasUploadingFiles && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-sm text-blue-800">
+                      <Loader2 className="w-4 h-4 inline mr-2 animate-spin" />
+                      Uploading files... Please wait.
+                    </p>
+                  </div>
+                )}
+
+                {hasFailedFiles && (
+                  <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-sm text-red-800">
+                      Some files failed to upload. Remove them and try again, or proceed with the successful uploads.
+                    </p>
+                  </div>
+                )}
+
+                {allFilesCompleted && files.length > 0 && (
+                  <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <p className="text-sm text-green-800">
+                      ✅ All files ready for analysis! Click "Analyze Code" to start.
                     </p>
                   </div>
                 )}

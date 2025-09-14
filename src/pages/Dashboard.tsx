@@ -671,51 +671,74 @@ const Dashboard = () => {
       <div className="flex w-full">
         <Sidebar />
         <main className="flex-1 p-6">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gradient">
-                  {isProgressiveMode ? 'Live Code Analysis Dashboard' : 'Code Analysis Dashboard'}
-                </h1>
-                <p className="text-muted-foreground mt-1">
-                  {isGitHubAnalysis ? (
-                    <>
-                      <Github className="w-4 h-4 inline mr-1" />
-                      GitHub Repository Analysis • {githubRepo} ({branch || 'main'})
-                    </>
-                  ) : (
-                    <>LangGraph multi-agent analysis results</>
-                  )}
-                  {analysisResults && ` • ${analysisResults.summary.total_files} files analyzed`}
-                  {isProgressiveMode && ` • Live Updates Active`}
-                  {jobId && ` • Job ID: ${jobId.slice(0, 8)}...`}
-                  {!jobId && analysisResults && (
-                    <span className="text-blue-600 dark:text-blue-400 ml-2">(restored from browser)</span>
-                  )}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {analysisResults && (
-                  <>
-                    <Button onClick={handleRefresh} variant="outline" size="sm">
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Refresh
-                    </Button>
-                    <Button onClick={handleStartChat} variant="outline">
-                      <MessageSquare className="w-4 h-4 mr-2" />
-                      Ask AI
-                    </Button>
-                  </>
-                )}
-                <Button onClick={() => navigate('/')} variant="outline">
-                  <ArrowRight className="w-4 h-4 mr-2" />
-                  New Analysis
-                </Button>
-              </div>
-            </div>
-          </div>
-
+          
+{/* Header */}
+<div className="mb-8">
+  <div className="flex items-center justify-between">
+    <div>
+      <h1 className="text-3xl font-bold text-gradient">
+        {isProgressiveMode ? 'Live Code Analysis Dashboard' : 'Code Analysis Dashboard'}
+      </h1>
+      <p className="text-muted-foreground mt-1">
+        {isGitHubAnalysis ? (
+          <>
+            <Github className="w-4 h-4 inline mr-1" />
+            GitHub Repository Analysis • {githubRepo} ({branch || 'main'})
+          </>
+        ) : (
+          <>LangGraph multi-agent analysis results</>
+        )}
+        {analysisResults && ` • ${analysisResults.summary.total_files} files analyzed`}
+        {isProgressiveMode && ` • Live Updates Active`}
+        {jobId && ` • Job ID: ${jobId.slice(0, 8)}...`}
+        {!jobId && analysisResults && (
+          <span className="text-blue-600 dark:text-blue-400 ml-2">(restored from browser)</span>
+        )}
+      </p>
+    </div>
+    <div className="flex items-center gap-3">
+      {/* Refresh Button - Always available if we have a jobId */}
+      {jobId && (
+        <Button onClick={handleRefresh} variant="outline" size="sm">
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Refresh
+        </Button>
+      )}
+      
+      {/* Ask AI Button - Conditional Logic */}
+      {analysisResults ? (
+        <Button 
+          onClick={handleStartChat} 
+          variant="outline"
+          disabled={isAnalyzing || isProgressiveMode}
+          className={`${
+            isAnalyzing || isProgressiveMode 
+              ? 'opacity-50 cursor-not-allowed' 
+              : ''
+          }`}
+        >
+          <MessageSquare className="w-4 h-4 mr-2" />
+          {isAnalyzing || isProgressiveMode ? 'Analysis in Progress...' : 'Ask AI'}
+        </Button>
+      ) : (
+        <Button 
+          variant="outline"
+          disabled={true}
+          className="opacity-50 cursor-not-allowed"
+        >
+          <MessageSquare className="w-4 h-4 mr-2" />
+          Ask AI
+        </Button>
+      )}
+      
+      {/* New Analysis Button */}
+      <Button onClick={() => navigate('/')} variant="outline">
+        <ArrowRight className="w-4 h-4 mr-2" />
+        New Analysis
+      </Button>
+    </div>
+  </div>
+</div>
           {/* GitHub Repository Header */}
           <GitHubRepoHeader />
 
